@@ -648,6 +648,7 @@ public class IR {
       case Token.THROW:
       case Token.TRY:
       case Token.VAR:
+      case Token.LET:
       case Token.WHILE:
       case Token.WITH:
         return true;
