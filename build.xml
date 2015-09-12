@@ -36,9 +36,9 @@
 
   <!-- define other variables -->
   <property name="javac.debug" value="on" />
-  <property name="src.dir" value="${basedir}/src" />
-  <property name="gen.dir" value="${basedir}/gen" />
-  <property name="test.dir" value="${basedir}/test" />
+  <property name="src.dir" value="${basedir}/compiler/src/main/java" />
+  <property name="gen.dir" value="${basedir}/compiler/src/main/gen" />
+  <property name="test.dir" value="${basedir}/compiler/src/test/java" />
   <property name="externs.dir" value="${basedir}/externs" />
   <!-- To workaround Ant limitation on overriding properties set on the
        command-line, define a unique property to allow "build.dir" to
@@ -56,11 +56,11 @@
             value="${build.dir}/${ant.project.name}.jar" />
   <property name="num-fuzz-tests" value="10000"/>
 
-  <property name="webservice.dir" value="${basedir}/src/com/google/javascript/jscomp/webservice" />
+  <property name="webservice.dir" value="${basedir}/compiler/src/main/java/com/google/javascript/jscomp/webservice" />
   <property name="webservice-classes.dir" value = "${build.dir}/webservice-classes" />
   <property name="webservice-jarfile" value="${build.dir}/webservice.jar" />
 
-  <property name="refasterjs.dir" value="${basedir}/src/com/google/javascript/refactoring" />
+  <property name="refasterjs.dir" value="${basedir}/compiler/src/main/java/com/google/javascript/refactoring" />
   <property name="refasterjs-classes.dir" value = "${build.dir}/refasterjs-classes" />
   <property name="refasterjs-jarfile" value="${build.dir}/refasterjs.jar" />
 

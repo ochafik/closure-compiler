@@ -38,8 +38,11 @@
   <inceptionYear>2009</inceptionYear>
 
   <properties>
+    <!-- -Dprotoc.executable=/usr/local/Cellar/protobuf/2.6.1/bin/protoc -->
+    <protoc.executable>protoc</protoc.executable>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.build.outputEncoding>UTF-8</project.build.outputEncoding>
+    <protoc.generatedSources>${project.basedir}/src/main/gen</protoc.generatedSources>
     <jdk.version>1.7</jdk.version>
     <!-- for substitution in ParserConfig.properties -->
     <compiler.date>${maven.build.timestamp}</compiler.date>
@@ -51,7 +54,7 @@
     <groupId>com.google.javascript</groupId>
     <artifactId>closure-compiler-parent</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <relativePath>pom.xml</relativePath>
+    <relativePath>../</relativePath>
   </parent>
 
   <dependencies>
@@ -76,7 +79,7 @@
     <dependency>
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
-      <version>2.5.0</version>
+      <version>2.6.1</version>
     </dependency>
 
     <dependency>
@@ -116,23 +119,37 @@
 
   <build>
     <defaultGoal>install</defaultGoal>
-    <sourceDirectory>${basedir}/src</sourceDirectory>
-    <testSourceDirectory>${basedir}/test</testSourceDirectory>
-
-    <resources>
-      <resource>
-        <directory>src/</directory>
-        <excludes>
-          <exclude>**/*.java</exclude>
-        </excludes>
-        <includes>
-          <include>**/*</include>
-        </includes>
-        <filtering>true</filtering>
-      </resource>
-    </resources>
 
     <plugins>
+      <plugin>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>compile-protoc</id>
+            <phase>generate-sources</phase>
+            <configuration>
+              <tasks>
+                <property name="generated.sourceDirectory" value="${generated.sourceDirectory}"/>
+                <mkdir dir="${protoc.generatedSources}" />
+                <path id="proto.path">
+                  <fileset dir="${project.basedir}/src/main/proto">
+                    <include name="**/*.proto" />
+                  </fileset>
+                </path>
+                <pathconvert pathsep=" " property="proto.files" refid="proto.path" />
+                <exec executable="${protoc.executable}" failonerror="false" searchpath="true">
+                  <arg value="--java_out=${protoc.generatedSources}" />
+                  <arg value="-I${project.basedir}/src/main/proto" />
+                  <arg line="${proto.files}" />
+                </exec>
+              </tasks>
+            </configuration>
+            <goals>
+              <goal>run</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>build-helper-maven-plugin</artifactId>
@@ -143,7 +160,7 @@
             <goals><goal>add-source</goal></goals>
             <configuration>
               <sources>
-                <source>gen</source>
+                <source>${protoc.generatedSources}</source>
               </sources>
             </configuration>
           </execution>
@@ -153,14 +170,15 @@
             <goals><goal>add-test-source</goal></goals>
             <configuration>
               <sources>
-                <source>src/com/google/javascript/rhino/testing</source>
-                <source>src/com/google/javascript/jscomp/testing</source>
+                <source>${project.basedir}/src/main/java/com/google/javascript/rhino/testing</source>
+                <source>${project.basedir}/src/main/java/com/google/javascript/jscomp/testing</source>
+                <source>${project.basedir}/src/main/java/com/google/javascript/refactoring/testing</source>
               </sources>
             </configuration>
           </execution>
         </executions>
       </plugin>
-
+      
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-resources-plugin</artifactId>
@@ -240,9 +258,31 @@
       </plugin>
 
       <plugin>
+        <artifactId>maven-shade-plugin</artifactId>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.google.javascript.jscomp.CommandLineRunner</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
         <artifactId>maven-jar-plugin</artifactId>
         <configuration>
           <archive>
+            <manifest>
+              <mainClass>com.google.javascript.jscomp.CommandLineRunner</mainClass>
+            </manifest>
             <manifestFile>${project.build.outputDirectory}/META-INF/MANIFEST.MF</manifestFile>
           </archive>
         </configuration>
