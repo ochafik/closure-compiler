@@ -1,3 +1,4 @@
+sudo: false
 language: java
 jdk:
   - openjdk7
@@ -5,8 +6,10 @@ jdk:
 notifications:
   email: false
 
-before_install:
- - sudo apt-get install -qq protobuf-compiler
+addons:
+  apt:
+    packages:
+      - protobuf-compiler
 
 before_script:
- - mavenize_file_layout.sh
+  - mavenize_file_layout.sh
