@@ -11,5 +11,9 @@ addons:
     packages:
       - protobuf-compiler
 
+cache:
+  directories:
+    - $HOME/.m2
+
 before_script:
   - mavenize_file_layout.sh
