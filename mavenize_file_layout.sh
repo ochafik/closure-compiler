@@ -17,4 +17,4 @@ function mv_rel_file() {
 
 for F in `find . -name '*.java'` ; do mv_rel_file $F ../compiler/src/main/java ; done
 for F in `find . -name '*.proto'` ; do mv_rel_file $F ../compiler/src/main/proto ; done
-for F in `find . -type f` ; do mv_rel_file $F ../compiler/src/main/proto ; done
+for F in `find . -type f` ; do mv_rel_file $F ../compiler/src/main/resources ; done
