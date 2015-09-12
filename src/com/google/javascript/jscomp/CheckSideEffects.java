@@ -16,8 +16,6 @@
 
 package com.google.javascript.jscomp;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.JSDocInfo;
@@ -25,6 +23,7 @@ import com.google.javascript.rhino.JSDocInfoBuilder;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
@@ -50,10 +49,10 @@ final class CheckSideEffects extends AbstractPostOrderCallback
 
   private final CheckLevel level;
 
-  private final List<Node> problemNodes = Lists.newArrayList();
+  private final List<Node> problemNodes = new ArrayList<>();
 
   private final LinkedHashMap<String, String> noSideEffectExterns =
-    Maps.newLinkedHashMap();
+     new LinkedHashMap<>();
 
   private final AbstractCompiler compiler;
 
@@ -68,9 +67,9 @@ final class CheckSideEffects extends AbstractPostOrderCallback
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, externs, new GetNoSideEffectExterns());
+    NodeTraversal.traverseEs6(compiler, externs, new GetNoSideEffectExterns());
 
-    NodeTraversal.traverse(compiler, root, this);
+    NodeTraversal.traverseEs6(compiler, root, this);
 
     // Code with hidden side-effect code is common, for example
     // accessing "el.offsetWidth" forces a reflow in browsers, to allow this
@@ -85,7 +84,7 @@ final class CheckSideEffects extends AbstractPostOrderCallback
 
   @Override
   public void hotSwapScript(Node scriptRoot, Node originalRoot) {
-    NodeTraversal.traverse(compiler, scriptRoot, this);
+    NodeTraversal.traverseEs6(compiler, scriptRoot, this);
   }
 
   @Override
@@ -121,7 +120,7 @@ final class CheckSideEffects extends AbstractPostOrderCallback
     if (!isResultUsed) {
       if (isSimpleOp || !NodeUtil.mayHaveSideEffects(n, t.getCompiler())) {
         String msg = "This code lacks side-effects. Is there a bug?";
-        if (n.isString()) {
+        if (n.isString() || n.isTemplateLit()) {
           msg = "Is there a missing '+' on the previous line?";
         } else if (isSimpleOp) {
           msg = "The result of the '" + Token.name(n.getType()).toLowerCase() +
@@ -191,8 +190,10 @@ final class CheckSideEffects extends AbstractPostOrderCallback
     // Add "@noalias" so we can strip the method when AliasExternals is enabled.
     JSDocInfoBuilder builder = new JSDocInfoBuilder(false);
     builder.recordNoAlias();
-    var.setJSDocInfo(builder.build(var));
+    var.setJSDocInfo(builder.build());
     CompilerInput input = compiler.getSynthesizedExternsInput();
+    name.setStaticSourceFile(input.getSourceFile());
+    var.setStaticSourceFile(input.getSourceFile());
     input.getAstRoot(compiler).addChildrenToBack(var);
     compiler.reportCodeChange();
   }
@@ -210,7 +211,7 @@ final class CheckSideEffects extends AbstractPostOrderCallback
 
     @Override
     public void process(Node externs, Node root) {
-      NodeTraversal.traverse(compiler, root, this);
+      NodeTraversal.traverseEs6(compiler, root, this);
     }
 
     @Override

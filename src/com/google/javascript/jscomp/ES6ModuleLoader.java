@@ -16,178 +16,156 @@
 
 package com.google.javascript.jscomp;
 
-import com.google.common.collect.Maps;
+import com.google.common.base.Function;
+import com.google.common.collect.Lists;
 
-import java.io.File;
 import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Provides compile-time locate semantics for ES6 and CommonJS modules.
  *
- * @see Section 26.3.3.18.2 of the ES6 spec
- * @see http://wiki.commonjs.org/wiki/Modules/1.1
+ * @see "Section 26.3.3.18.2 of the ES6 spec"
+ * @see "http://wiki.commonjs.org/wiki/Modules/1.1"
  */
-abstract class ES6ModuleLoader {
-  /**
-   * According to the spec, the forward slash should be the delimiter on all
-   * platforms.
-   */
+public final class ES6ModuleLoader {
+  /** According to the spec, the forward slash should be the delimiter on all platforms. */
   static final String MODULE_SLASH = "/";
-
-  /**
-   * When a module resolves to a directory, this index file is checked for.
-   */
-  static final String INDEX_FILE = "index.js";
-
-  /**
-   * Whether this is relative to the current file, or a top-level identifier.
-   */
-  static boolean isRelativeIdentifier(String name) {
-    return name.startsWith("." + MODULE_SLASH) ||
-        name.startsWith(".." + MODULE_SLASH);
-  }
+  /** The default module root, the current directory. */
+  public static final String DEFAULT_FILENAME_PREFIX = "." + MODULE_SLASH;
 
   static final DiagnosticType LOAD_ERROR = DiagnosticType.error(
       "JSC_ES6_MODULE_LOAD_ERROR",
       "Failed to load module \"{0}\"");
 
-  /**
-   * The normalize hook creates a global qualified name for a module, and then
-   * the locate hook creates an address. Meant to mimic the behavior of these
-   * two hooks.
-   * @param name The name passed to the require() call
-   * @param referrer The file where we're calling from
-   * @return A globally unique address.
-   */
-  abstract String locate(String name, CompilerInput referrer);
+  /** The root URIs that modules are resolved against. */
+  private final List<URI> moduleRootUris;
+  /** The set of all known input module URIs (including trailing .js), after normalization. */
+  private final Set<URI> moduleUris;
 
   /**
-   * Locates a compiler input by ES6 module address.
+   * Creates an instance of the module loader which can be used to locate ES6 and CommonJS modules.
    *
-   * If the input doesn't exist, the implementation can decide whether to create
-   * an input, or fail softly (by returning null), or throw an error.
+   * @param moduleRoots The root directories to locate modules in.
+   * @param inputs All inputs to the compilation process.
    */
-  abstract CompilerInput load(String name) throws LoadFailedException;
-
-  /**
-   * Gets the ES6 module address for an input.
-   */
-  abstract String getLoadAddress(CompilerInput input);
-
-  /**
-   * Error thrown when a load fails.
-   */
-  static class LoadFailedException extends Exception {
-    final String loadAddress;
-
-    LoadFailedException(String reason, String loadAddress) {
-      super(reason);
-      this.loadAddress = loadAddress;
+  public ES6ModuleLoader(List<String> moduleRoots, Iterable<CompilerInput> inputs) {
+    this.moduleRootUris =
+        Lists.transform(
+            moduleRoots,
+            new Function<String, URI>() {
+              @Override
+              public URI apply(String path) {
+                return createUri(path);
+              }
+            });
+    this.moduleUris = new HashSet<URI>();
+    for (CompilerInput input : inputs) {
+      if (!moduleUris.add(normalizeInputAddress(input))) {
+        // Having root URIs "a" and "b" and source files "a/f.js" and "b/f.js" is ambiguous.
+        throw new IllegalArgumentException(
+            "Duplicate module URI after resolving: " + input.getName());
+      }
     }
   }
 
   /**
-   * A naive module loader treats all module references as direct file paths.
-   *
-   * require('./foo') refers to 'foo.js' in the current directory.
-   * require('foo') refers to 'foo.js' in the directory where the compiler was
-   * run.
-   *
-   * This module loader does not know how to load files. If a file doesn't
-   * exist yet, then load() will fail.
-   *
-   * @param moduleRoot The module root, relative to the compiler's
-   *     current working directory.
+   * Find a CommonJS module {@code requireName} relative to {@code context}.
+   * @return The normalized module URI, or {@code null} if not found.
    */
-  static ES6ModuleLoader createNaiveLoader(
-      AbstractCompiler compiler, String moduleRoot) {
-    return new NaiveModuleLoader(compiler, moduleRoot);
+  URI locateCommonJsModule(String requireName, CompilerInput context) {
+    // * the immediate name require'd
+    URI loadAddress = locate(requireName, context);
+    if (loadAddress == null) {
+      // * the require'd name + /index.js
+      loadAddress = locate(requireName + MODULE_SLASH + "index.js", context);
+    }
+    if (loadAddress == null) {
+      // * the require'd name with a potential trailing ".js"
+      loadAddress = locate(requireName + ".js", context);
+    }
+    return loadAddress; // could be null.
   }
 
-  private static class NaiveModuleLoader extends ES6ModuleLoader {
-    private final AbstractCompiler compiler;
-    private final Map<String, CompilerInput> inputsByAddress =
-        Maps.newHashMap();
-    private final String moduleRoot;
-    private final URI moduleRootURI;
+  /**
+   * Find an ES6 module {@code moduleName} relative to {@code context}.
+   * @return The normalized module URI, or {@code null} if not found.
+   */
+  URI locateEs6Module(String moduleName, CompilerInput context) {
+    return locate(moduleName + ".js", context);
+  }
 
-    private NaiveModuleLoader(AbstractCompiler compiler, String moduleRoot) {
-      this.compiler = compiler;
-      this.moduleRoot = moduleRoot;
-      this.moduleRootURI = new File(moduleRoot).toURI();
+  private URI locate(String name, CompilerInput referrer) {
+    URI uri = createUri(name);
+    if (isRelativeIdentifier(name)) {
+      URI referrerUri = normalizeInputAddress(referrer);
+      uri = referrerUri.resolve(uri);
+    }
+    URI normalized = normalizeAddress(uri);
+    if (moduleUris.contains(normalized)) {
+      return normalized;
+    }
+    return null;
+  }
 
-      // Precompute the module name of each source file.
-      for (CompilerInput input : compiler.getInputsInOrder()) {
-        inputsByAddress.put(getLoadAddress(input), input);
+  /**
+   * Normalizes the address of {@code input} and resolves it against the module roots.
+   */
+  URI normalizeInputAddress(CompilerInput input) {
+    String name = input.getName();
+    return normalizeAddress(createUri(name));
+  }
+
+  /**
+   * Normalizes the URI for the given {@code uri} by resolving it against the known
+   * {@link #moduleRootUris}.
+   */
+  private URI normalizeAddress(URI uri) {
+    // Find a moduleRoot that this URI is under. If none, use as is.
+    for (URI moduleRoot : moduleRootUris) {
+      if (uri.toString().startsWith(moduleRoot.toString())) {
+        return moduleRoot.relativize(uri);
       }
     }
+    // Not underneath any of the roots.
+    return uri;
+  }
 
-    @Override
-    String locate(String name, CompilerInput referrer) {
-      if (isRelativeIdentifier(name)) {
-        return convertSourceUriToModuleAddress(
-            createUri(referrer).resolve(createUri(name)));
-      }
-      return createUri(name).normalize().toString();
+  private static URI createUri(String input) {
+    // Colons might cause URI.create() to fail
+    String forwardSlashes = input.replace(':', '-').replace("\\", MODULE_SLASH);
+    return URI.create(forwardSlashes).normalize();
+  }
+
+  private static String stripJsExtension(String fileName) {
+    if (fileName.endsWith(".js")) {
+      return fileName.substring(0, fileName.length() - ".js".length());
     }
+    return fileName;
+  }
 
-    @Override
-    CompilerInput load(String name) {
-      return inputsByAddress.get(name);
-    }
+  /** Whether this is relative to the current file, or a top-level identifier. */
+  static boolean isRelativeIdentifier(String name) {
+    return name.startsWith("." + MODULE_SLASH) || name.startsWith(".." + MODULE_SLASH);
+  }
 
-    @Override
-    String getLoadAddress(CompilerInput input) {
-      return convertSourceUriToModuleAddress(createUri(input));
-    }
-
-    private static URI createUri(CompilerInput input) {
-      return createUri(
-          input.getName().replace("\\", MODULE_SLASH));
-    }
-
-    // TODO(nicksantos): Figure out a better way to deal with
-    // URI syntax errors.
-    private static URI createUri(String uri) {
-      try {
-        return new URI(uri);
-      } catch (URISyntaxException e) {
-        throw new RuntimeException(e);
-      }
-    }
-
-    private String resolveInFileSystem(String filename) {
-      File f = new File(filename);
-
-      // Resolve index.js files within directories.
-      if (f.exists() && f.isDirectory()) {
-        File index = new File(f, INDEX_FILE);
-        if (index.exists()) {
-          return moduleRootURI.relativize(index.toURI()).getPath();
-        }
-      }
-
-      return filename;
-    }
-
-    private String convertSourceUriToModuleAddress(URI uri) {
-      String filename = resolveInFileSystem(uri.normalize().toString());
-
-      // The DOS command shell will normalize "/" to "\", so we have to
-      // wrestle it back to conform the the module standard.
-      filename = filename.replace("\\", MODULE_SLASH);
-
-      // TODO(nicksantos): It's not totally clear to me what
-      // should happen if a file is not under the given module root.
-      // Maybe this should be an error, or resolved differently.
-      if (!moduleRoot.isEmpty() &&
-          filename.indexOf(moduleRoot) == 0) {
-        filename = filename.substring(moduleRoot.length());
-      }
-
-      return filename;
-    }
+  /**
+   * Turns a filename into a JS identifier that is used for moduleNames in
+   * rewritten code. Removes leading ./, replaces / with $, removes trailing .js
+   * and replaces - with _. All moduleNames get a "module$" prefix.
+   */
+  public static String toModuleName(URI filename) {
+    String moduleName =
+        stripJsExtension(filename.toString())
+            .replaceAll("^\\." + Pattern.quote(MODULE_SLASH), "")
+            .replace(MODULE_SLASH, "$")
+            .replace('\\', '$')
+            .replace('-', '_')
+            .replace(':', '_')
+            .replace('.', '_');
+    return "module$" + moduleName;
   }
 }

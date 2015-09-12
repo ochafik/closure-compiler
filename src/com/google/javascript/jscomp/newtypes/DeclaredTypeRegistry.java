@@ -20,14 +20,23 @@ package com.google.javascript.jscomp.newtypes;
 public interface DeclaredTypeRegistry {
 
   /**
-   * Returns a JSType from a given named type,
+   * Get the type of the function that the declared type registry represents.
+   */
+  DeclaredFunctionType getDeclaredFunctionType();
+
+  /**
+   * Returns the declaration of the given qualified name,
+   * or null if the name is not defined.
+   * If {@code includeTypes} is true, include definitions that are not in code,
+   * such as @template parameters and forward declarations.
+   */
+  Declaration getDeclaration(QualifiedName qname, boolean includeTypes);
+
+  /**
+   * Returns the declared JSType of the given identifier,
    * or null if the identifier is not defined.
    */
-  public JSType lookupTypeByName(String name);
+  JSType getDeclaredTypeOf(String name);
 
-  /** Returns the instance of the typedef named {@code name} */
-  public Typedef getTypedef(String name);
-
-  /** Returns the instance of the enum named {@code name} */
-  public EnumType getEnum(String name);
+  JSTypes getCommonTypes();
 }

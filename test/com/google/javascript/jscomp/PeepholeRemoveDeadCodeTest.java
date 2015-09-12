@@ -23,7 +23,7 @@ import com.google.javascript.rhino.Node;
  * of multiple peephole passes are in PeepholeIntegrationTest.
  */
 
-public class PeepholeRemoveDeadCodeTest extends CompilerTestCase {
+public final class PeepholeRemoveDeadCodeTest extends CompilerTestCase {
 
   private static final String MATH =
       "/** @const */ var Math = {};" +
@@ -32,12 +32,6 @@ public class PeepholeRemoveDeadCodeTest extends CompilerTestCase {
 
   public PeepholeRemoveDeadCodeTest() {
     super(MATH);
-  }
-
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
-    enableLineNumberCheck(true);
   }
 
   @Override

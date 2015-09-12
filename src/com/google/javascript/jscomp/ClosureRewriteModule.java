@@ -20,6 +20,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
 import com.google.javascript.rhino.IR;
+import com.google.javascript.rhino.JSDocInfo;
+import com.google.javascript.rhino.JSDocInfoBuilder;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
@@ -29,24 +31,29 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Process aliases in goog.scope blocks.
+ * Process aliases in goog.modules.
  * <pre>
  * goog.module('namespace');
  * var foo = goog.require('another.namespace');
+ * ...
+ * </pre>
  *
- * should become
+ * becomes
  *
+ * <pre>
  * goog.provide('namespace');
  * goog.require('another.namespace');
- * etc
+ * goog.scope(function() {
+ *   var foo = another.namespace;
+ *   ...
+ * });
  * </pre>
  *
  * @author johnlenz@google.com (John Lenz)
  */
-public class ClosureRewriteModule
-    implements NodeTraversal.Callback, HotSwapCompilerPass {
+final class ClosureRewriteModule implements NodeTraversal.Callback, HotSwapCompilerPass {
 
-  // TODO(johnlenz): Don't use goog.scope as an intermediary add type checker
+  // TODO(johnlenz): Don't use goog.scope as an intermediary; add type checker
   // support instead.
   // TODO(johnlenz): harden this class to warn about misuse
   // TODO(johnlenz): handle non-namespace module identifiers aka 'foo/bar'
@@ -71,9 +78,14 @@ public class ClosureRewriteModule
           "JSC_GOOG_MODULE_INVALID_GET_CALL_SCOPE",
           "goog.module.get can not be called in global scope.");
 
+  static final DiagnosticType INVALID_GET_ALIAS =
+      DiagnosticType.error(
+          "JSC_GOOG_MODULE_INVALID_GET_ALIAS",
+          "goog.module.get should not be aliased.");
+
   private final AbstractCompiler compiler;
 
-  private static class ModuleDescription {
+  private class ModuleDescription {
     Node moduleDecl;
     String moduleNamespace = "";
     Node requireInsertNode = null;
@@ -116,7 +128,7 @@ public class ClosureRewriteModule
 
   @Override
   public void hotSwapScript(Node scriptRoot, Node originalRoot) {
-    NodeTraversal.traverse(compiler, scriptRoot, this);
+    NodeTraversal.traverseEs6(compiler, scriptRoot, this);
   }
 
   @Override
@@ -127,17 +139,44 @@ public class ClosureRewriteModule
     if (isGetModuleCall(n)) {
       rewriteGetModuleCall(t, n);
     }
+
+    if (inModule()) {
+      switch (n.getType()) {
+        case Token.SCRIPT:
+          current.moduleScope = t.getScope();
+          break;
+        case Token.BLOCK:
+          if (current.moduleScopeRoot == parent && parent.isFunction()) {
+            current.moduleScope = t.getScope();
+          }
+          break;
+        case Token.ASSIGN:
+          if (isGetModuleCallAlias(n)) {
+            rewriteGetModuleCallAlias(t, n);
+          }
+          break;
+        default:
+          if (current.moduleScopeRoot == parent && parent.isBlock()) {
+            current.moduleScope = t.getScope();
+          }
+          break;
+      }
+    }
+
     return true;
   }
 
-  private static boolean isLoadModuleCall(Node n) {
+  private static boolean isCallTo(Node n, String qname) {
     return n.isCall()
-        && n.getFirstChild().matchesQualifiedName("goog.loadModule");
+        && n.getFirstChild().matchesQualifiedName(qname);
+  }
+
+  private static boolean isLoadModuleCall(Node n) {
+    return isCallTo(n, "goog.loadModule");
   }
 
   private static boolean isGetModuleCall(Node n) {
-    return n.isCall()
-        && n.getFirstChild().matchesQualifiedName("goog.module.get");
+    return isCallTo(n, "goog.module.get");
   }
 
   private void rewriteGetModuleCall(NodeTraversal t, Node n) {
@@ -157,6 +196,46 @@ public class ClosureRewriteModule
     replacement.srcrefTree(namespace);
 
     n.getParent().replaceChild(n, replacement);
+    compiler.reportCodeChange();
+  }
+
+  private void rewriteGetModuleCallAlias(NodeTraversal t, Node n) {
+    // x = goog.module.get('a.namespace');
+    Preconditions.checkArgument(NodeUtil.isExprAssign(n.getParent()));
+    Preconditions.checkArgument(n.getFirstChild().isName());
+    Preconditions.checkArgument(isGetModuleCall(n.getLastChild()));
+
+    rewriteGetModuleCall(t, n.getLastChild());
+
+    String aliasName = n.getFirstChild().getQualifiedName();
+    Var alias = t.getScope().getVar(aliasName);
+    if (alias == null) {
+      t.report(n, INVALID_GET_ALIAS);
+      return;
+    }
+    // Only rewrite if original definition was of the form:
+    //   let x = goog.forwardDeclare('a.namespace');
+    Node forwardDeclareCall = NodeUtil.getRValueOfLValue(alias.getNode());
+    if (forwardDeclareCall == null
+        || !isCallTo(forwardDeclareCall, "goog.forwardDeclare")
+        || forwardDeclareCall.getChildCount() != 2) {
+      t.report(n, INVALID_GET_ALIAS);
+      return;
+    }
+    Node argument = forwardDeclareCall.getLastChild();
+    if (!argument.isString() || !n.getLastChild().matchesQualifiedName(argument.getString())) {
+      t.report(n, INVALID_GET_ALIAS);
+      return;
+    }
+
+    Node replacement = NodeUtil.newQName(compiler, argument.getString());
+    replacement.srcrefTree(forwardDeclareCall);
+
+    // Rewrite goog.forwardDeclare
+    forwardDeclareCall.getParent().replaceChild(forwardDeclareCall, replacement);
+    // and remove goog.module.get
+    n.getParent().detachFromParent();
+
     compiler.reportCodeChange();
   }
 
@@ -182,6 +261,11 @@ public class ClosureRewriteModule
     return false;
   }
 
+  private static boolean isGetModuleCallAlias(Node n) {
+    return NodeUtil.isExprAssign(n.getParent())
+        && n.getFirstChild().isName() && isGetModuleCall(n.getLastChild());
+  }
+
   /**
    * Rewrite:
    *   goog.module('foo')
@@ -203,51 +287,131 @@ public class ClosureRewriteModule
     }
 
     switch (n.getType()) {
-      case Token.FUNCTION:
-        if (current.moduleScopeRoot == n) {
-          current.moduleScope = t.getScope();
-        }
-        break;
-
       case Token.EXPR_RESULT:
-        if (n.getFirstChild().isCall()) {
-          Node target = n.getFirstChild().getFirstChild();
-          if (target.matchesQualifiedName(
-              "goog.module.declareLegacyNamespace")) {
-            n.detachFromParent();
-          }
+        // Handle "goog.module.declareLegacyNamespace".  Currently, we simply
+        // need to remove it.
+        if (isCallTo(n.getFirstChild(),
+            "goog.module.declareLegacyNamespace")) {
+          n.detachFromParent();
         }
         break;
 
       case Token.CALL:
-        Node first = n.getFirstChild();
-        if (first.matchesQualifiedName("goog.module")) {
+        if (isCallTo(n, "goog.module")) {
           recordAndUpdateModule(t, n);
-        } else if (first.matchesQualifiedName("goog.require")) {
+        } else if (isCallTo(n, "goog.require")) {
           recordRequire(t, n);
         } else if (isLoadModuleCall(n)) {
           rewriteModuleAsScope(n);
         }
         break;
 
+      case Token.GETPROP:
+        if (isExportPropAssign(n)) {
+          Node rhs = parent.getLastChild();
+          maybeUpdateExportDeclToNode(t, parent, rhs);
+        }
+        break;
+
       case Token.NAME:
         if (n.getString().equals("exports")) {
           current.exports.add(n);
+          if (isAssignTarget(n)) {
+            maybeUpdateExportObjectDecl(t, n);
+          }
         }
         break;
 
       case Token.SCRIPT:
-        current.moduleScope = t.getScope();
         // Exiting the script, fixup everything else;
         rewriteModuleAsScope(n);
         break;
 
       case Token.RETURN:
-        if (t.getScopeRoot() == current.moduleScopeRoot) {
+        // Remove the "return exports" for bundled goog.module files.
+        if (parent == current.moduleStatementRoot) {
           n.detachFromParent();
         }
         break;
     }
+  }
+
+  /**
+   * For exports like "exports = {prop: value}" update the declarations to enforce
+   * @const ness (and typedef exports).
+   */
+  private void maybeUpdateExportObjectDecl(NodeTraversal t, Node n) {
+    Node parent = n.getParent();
+    Node rhs = parent.getLastChild();
+    // The export declaration itself
+    maybeUpdateExportDeclToNode(t, parent, rhs);
+
+    if (rhs.isObjectLit()) {
+      for (Node c = rhs.getFirstChild(); c != null; c = c.getNext()) {
+        if (c.isStringKey()) {
+          Node value = c.getFirstChild();
+          maybeUpdateExportDeclToNode(t, c, value);
+        }
+      }
+    }
+  }
+
+  private void maybeUpdateExportDeclToNode(
+      NodeTraversal t, Node target, Node value) {
+    // If the RHS is a typedef, clone the declaration.
+    // Hack alert: clone the typedef declaration if one exists
+    // this is a simple attempt that covers the common case of the
+    // exports being in the same scope as the typedef declaration.
+    // Otherwise the type name might be invalid.
+    if (value.isName()) {
+      Scope currentScope = t.getScope();
+      Var v = t.getScope().getVar(value.getString());
+      if (v != null) {
+        Scope varScope = v.getScope();
+        if (varScope.getDepth() == currentScope.getDepth()) {
+          JSDocInfo info = v.getJSDocInfo();
+          if (info != null && info.hasTypedefType()) {
+            JSDocInfoBuilder builder = JSDocInfoBuilder.copyFrom(info);
+            target.setJSDocInfo(builder.build());
+            return;
+          }
+        }
+      }
+    }
+
+    // Don't add @const on class declarations, @const on classes has a
+    // different meaning (it means "not subclassable").
+    // "goog.defineClass" hasn't been rewritten yet, so check for that
+    // explicitly.
+    JSDocInfo info = target.getJSDocInfo();
+    if ((info != null && info.isConstructorOrInterface()
+        || isCallTo(value, "goog.defineClass"))) {
+      return;
+    }
+
+    // Not a known typedef export, simple declare the props to be @const,
+    // this is valid because we freeze module export objects.
+    JSDocInfoBuilder builder = JSDocInfoBuilder.maybeCopyFrom(info);
+    builder.recordConstancy();
+    target.setJSDocInfo(builder.build());
+  }
+
+  /**
+   * @return Whether the getprop is used as an assignment target, and that
+   *     target represents a module export.
+   * Note: that "export.name = value" is an export, while "export.name.foo = value"
+   *     is not (it is an assignment to a property of an exported value).
+   */
+  private static boolean isExportPropAssign(Node n) {
+    Preconditions.checkState(n.isGetProp());
+    Node target = n.getFirstChild();
+    return isAssignTarget(n) && target.isName()
+        && target.getString().equals("exports");
+  }
+
+  private static boolean isAssignTarget(Node n) {
+    Node parent = n.getParent();
+    return parent.isAssign() && parent.getFirstChild() == n;
   }
 
   private void recordAndUpdateModule(NodeTraversal t, Node call) {
@@ -292,7 +456,7 @@ public class ClosureRewriteModule
     // rewrite:
     //   var foo = goog.require('ns.foo')
     // to
-    //   goog.provide('foo');
+    //   goog.require('foo');
     //   var foo = ns.foo;
 
     // replace the goog.require statementment with a reference to the
@@ -383,7 +547,7 @@ public class ClosureRewriteModule
       return;
     }
 
-    new NodeTraversal(compiler, new AbstractPostOrderCallback() {
+    NodeTraversal.traverseEs6(compiler, s.getRootNode(), new AbstractPostOrderCallback() {
       @Override
       public void visit(NodeTraversal t, Node n, Node parent) {
         if (n.isName()) {
@@ -393,21 +557,23 @@ public class ClosureRewriteModule
           }
         }
       }
-    }).traverseAtScope(s);
+    });
   }
 
-  private static Node getModuleScopeRootForLoadModuleCall(Node n) {
+  private Node getModuleScopeRootForLoadModuleCall(Node n) {
     Preconditions.checkState(n.isCall());
     Node fn = n.getLastChild();
     Preconditions.checkState(fn.isFunction());
-    return fn;
+    return fn.getLastChild();
   }
 
-  private static Node getModuleStatementRootForLoadModuleCall(Node n) {
-    Node fn = getModuleScopeRootForLoadModuleCall(n);
-    Node block = fn.getLastChild();
-    Preconditions.checkState(block.isBlock());
-    return block;
+  private Node getModuleStatementRootForLoadModuleCall(Node n) {
+    Node scopeRoot = getModuleScopeRootForLoadModuleCall(n);
+    if (scopeRoot.isFunction()) {
+      return scopeRoot.getLastChild();
+    } else {
+      return scopeRoot;
+    }
   }
 
   private Node skipHeaderNodes(Node script) {

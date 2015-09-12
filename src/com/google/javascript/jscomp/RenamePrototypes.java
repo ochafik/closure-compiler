@@ -150,30 +150,27 @@ class RenamePrototypes implements CompilerPass {
    * ensure a deterministic total ordering.
    */
   private static final Comparator<Property> FREQUENCY_COMPARATOR =
-    new Comparator<Property>() {
-      @Override
-      public int compare(Property a1, Property a2) {
-        int n1 = a1.count();
-        int n2 = a2.count();
-        if (n1 != n2) {
-          return n2 - n1;
+      new Comparator<Property>() {
+        @Override
+        public int compare(Property a1, Property a2) {
+          int n1 = a1.count();
+          int n2 = a2.count();
+          if (n1 != n2) {
+            return n2 - n1;
+          }
+          return a1.oldName.compareTo(a2.oldName);
         }
-        return a1.oldName.compareTo(a2.oldName);
-      }
-    };
-
+      };
 
   // Set of String nodes to rename
   private final Set<Node> stringNodes = new HashSet<>();
 
   // Mapping of property names to Property objects
-  private final Map<String, Property> properties =
-      new HashMap<>();
+  private final Map<String, Property> properties = new HashMap<>();
 
   // Set of names not to rename. Externed properties/methods are added later.
   private final Set<String> reservedNames =
-      new HashSet<>(Arrays.asList(
-          "indexOf", "lastIndexOf", "toString", "valueOf"));
+      new HashSet<>(Arrays.asList("indexOf", "lastIndexOf", "toString", "valueOf"));
 
   // Set of OBJLIT nodes that are assigned to prototypes
   private final Set<Node> prototypeObjLits = new HashSet<>();
@@ -187,9 +184,11 @@ class RenamePrototypes implements CompilerPass {
    *   generated names
    * @param prevUsedRenameMap The rename map used in the previous compilation
    */
-  RenamePrototypes(AbstractCompiler compiler, boolean aggressiveRenaming,
-                   @Nullable char[] reservedCharacters,
-                   @Nullable VariableMap prevUsedRenameMap) {
+  RenamePrototypes(
+      AbstractCompiler compiler,
+      boolean aggressiveRenaming,
+      @Nullable char[] reservedCharacters,
+      @Nullable VariableMap prevUsedRenameMap) {
     this.compiler = compiler;
     this.aggressiveRenaming = aggressiveRenaming;
     this.reservedCharacters = reservedCharacters;
@@ -206,16 +205,15 @@ class RenamePrototypes implements CompilerPass {
   public void process(Node externs, Node root) {
     Preconditions.checkState(compiler.getLifeCycleStage().isNormalized());
 
-    NodeTraversal.traverse(compiler, externs,
-                           new ProcessExternedProperties());
-    NodeTraversal.traverse(compiler, root, new ProcessProperties());
+    NodeTraversal.traverseEs6(compiler, externs, new ProcessExternedProperties());
+    NodeTraversal.traverseEs6(compiler, root, new ProcessProperties());
 
     // Gather the properties to rename, sorted by count.
-    SortedSet<Property> propsByFrequency =
-        new TreeSet<>(FREQUENCY_COMPARATOR);
+    SortedSet<Property> propsByFrequency = new TreeSet<>(FREQUENCY_COMPARATOR);
 
-    for (Iterator<Map.Entry<String, Property>> it =
-           properties.entrySet().iterator(); it.hasNext(); ) {
+    for (Iterator<Map.Entry<String, Property>> it = properties.entrySet().iterator();
+        it.hasNext();
+        ) {
       Property a = it.next().getValue();
       if (a.canRename() && !reservedNames.contains(a.oldName)) {
         propsByFrequency.add(a);
@@ -234,8 +232,7 @@ class RenamePrototypes implements CompilerPass {
     }
 
     // Generate new names.
-    NameGenerator nameGen = new NameGenerator(reservedNames, "",
-                                              reservedCharacters);
+    NameGenerator nameGen = new NameGenerator(reservedNames, "", reservedCharacters);
     StringBuilder debug = new StringBuilder();
     for (Property a : propsByFrequency) {
       if (a.newName == null) {
@@ -243,7 +240,11 @@ class RenamePrototypes implements CompilerPass {
         reservedNames.add(a.newName);
       }
 
-      debug.append(a.oldName).append(" => ").append(a.newName).append('\n');
+      debug
+          .append(a.oldName)
+          .append(" => ")
+          .append(a.newName)
+          .append('\n');
     }
 
     compiler.addToDebugLog("JS property assignments:\n" + debug);
@@ -334,9 +335,7 @@ class RenamePrototypes implements CompilerPass {
             // Object literals have their property name/value pairs as a flat
             // list as their children. We want every other node in order to get
             // only the property names.
-            for (Node child = n.getFirstChild();
-                 child != null;
-                 child = child.getNext()) {
+            for (Node child = n.getFirstChild(); child != null; child = child.getNext()) {
 
               if (TokenStream.isJSIdentifier(child.getString())) {
                 markObjLitPropertyCandidate(child, t.getInput());
@@ -354,7 +353,7 @@ class RenamePrototypes implements CompilerPass {
      */
     private void processPrototypeParent(Node n, CompilerInput input) {
       switch (n.getType()) {
-        // Foo.prototype.getBar = function() { ... }
+          // Foo.prototype.getBar = function() { ... }
         case Token.GETPROP:
         case Token.GETELEM:
           Node dest = n.getFirstChild().getNext();
@@ -363,7 +362,7 @@ class RenamePrototypes implements CompilerPass {
           }
           break;
 
-        // Foo.prototype = { "getBar" : function() { ... } }
+          // Foo.prototype = { "getBar" : function() { ... } }
         case Token.ASSIGN:
         case Token.CALL:
           Node map;
@@ -377,10 +376,9 @@ class RenamePrototypes implements CompilerPass {
             // the traversal reaches it.
             prototypeObjLits.add(map);
 
-            for (Node key = map.getFirstChild();
-                 key != null; key = key.getNext()) {
+            for (Node key = map.getFirstChild(); key != null; key = key.getNext()) {
               if (TokenStream.isJSIdentifier(key.getString())) {
-               // May be STRING, GET, or SET
+                // May be STRING, GET, or SET
                 markPrototypePropertyCandidate(key, input);
               }
             }

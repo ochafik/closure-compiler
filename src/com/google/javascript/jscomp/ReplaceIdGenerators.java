@@ -18,19 +18,14 @@ package com.google.javascript.jscomp;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.BiMap;
-import com.google.common.collect.HashBiMap;
 import com.google.common.collect.ImmutableBiMap;
-import com.google.common.collect.Maps;
 import com.google.debugging.sourcemap.Base64;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.Node;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.StringReader;
-import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -72,6 +67,25 @@ class ReplaceIdGenerators implements CompilerPass {
           "JSC_INVALID_GENERATOR_PARAMETER",
           "An id generator must be called with a literal.");
 
+  static final DiagnosticType SHORTHAND_FUNCTION_NOT_SUPPORTED_IN_ID_GEN =
+      DiagnosticType.error(
+          "JSC_SHORTHAND_FUNCTION_NOT_SUPPORTED_IN_ID_GEN",
+          "Object literal shorthand functions is not allowed in the "
+          + "arguments of an id generator");
+
+  static final DiagnosticType SHORTHAND_ASSIGNMENT_NOT_SUPPORTED_IN_ID_GEN =
+      DiagnosticType.error(
+          "JSC_SHORTHAND_ASSIGNMENT_NOT_SUPPORTED_IN_ID_GEN",
+          "Object literal shorthand assignment is not allowed in the "
+          + "arguments of an id generator");
+
+  static final DiagnosticType COMPUTED_PROP_NOT_SUPPORTED_IN_ID_GEN =
+      DiagnosticType.error(
+          "JSC_COMPUTED_PROP_NOT_SUPPORTED_IN_ID_GEN",
+          "Object literal computed property name is not allowed in the "
+          + "arguments of an id generator");
+
+
   private final AbstractCompiler compiler;
   private final Map<String, NameSupplier> nameGenerators;
   private final Map<String, Map<String, String>> consistNameMap;
@@ -93,12 +107,12 @@ class ReplaceIdGenerators implements CompilerPass {
       String previousMapSerialized) {
     this.compiler = compiler;
     this.generatePseudoNames = generatePseudoNames;
-    nameGenerators = Maps.newLinkedHashMap();
-    idGeneratorMaps = Maps.newLinkedHashMap();
-    consistNameMap = Maps.newLinkedHashMap();
+    nameGenerators = new LinkedHashMap<>();
+    idGeneratorMaps = new LinkedHashMap<>();
+    consistNameMap = new LinkedHashMap<>();
 
     Map<String, BiMap<String, String>> previousMap;
-    previousMap = parsePreviousResults(previousMapSerialized);
+    previousMap = IdMappingUtil.parseSerializedIdMappings(previousMapSerialized);
     this.previousMap = previousMap;
 
     if (idGens != null) {
@@ -114,7 +128,7 @@ class ReplaceIdGenerators implements CompilerPass {
               createNameSupplier(
                   RenameStrategy.MAPPED, map));
         }
-        idGeneratorMaps.put(name, Maps.<String, String>newLinkedHashMap());
+        idGeneratorMaps.put(name, new LinkedHashMap<String, String>());
       }
     }
   }
@@ -253,7 +267,7 @@ class ReplaceIdGenerators implements CompilerPass {
       String name = null;
       if (n.isAssign()) {
         name = n.getFirstChild().getQualifiedName();
-      } else if (n.isVar()) {
+      } else if (NodeUtil.isNameDeclaration(n)) {
         name = n.getFirstChild().getString();
       } else if (n.isFunction()){
         name = n.getFirstChild().getString();
@@ -263,7 +277,7 @@ class ReplaceIdGenerators implements CompilerPass {
       }
 
       if (doc.isConsistentIdGenerator()) {
-        consistNameMap.put(name, Maps.<String, String>newLinkedHashMap());
+        consistNameMap.put(name, new LinkedHashMap<String, String>());
         nameGenerators.put(
             name, createNameSupplier(
                 RenameStrategy.CONSISTENT, previousMap.get(name)));
@@ -287,15 +301,15 @@ class ReplaceIdGenerators implements CompilerPass {
       } else {
         throw new IllegalStateException("unexpected");
       }
-      idGeneratorMaps.put(name, Maps.<String, String>newLinkedHashMap());
+      idGeneratorMaps.put(name, new LinkedHashMap<String, String>());
     }
   }
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, root, new GatherGenerators());
+    NodeTraversal.traverseEs6(compiler, root, new GatherGenerators());
     if (!nameGenerators.isEmpty()) {
-      NodeTraversal.traverse(compiler, root, new ReplaceGenerators());
+      NodeTraversal.traverseEs6(compiler, root, new ReplaceGenerators());
     }
   }
 
@@ -312,8 +326,8 @@ class ReplaceIdGenerators implements CompilerPass {
         return;
       }
 
-      if (!t.inGlobalScope() &&
-          nameGenerator.getRenameStrategy() == RenameStrategy.INCONSISTENT) {
+      if (!t.inGlobalHoistScope()
+          && nameGenerator.getRenameStrategy() == RenameStrategy.INCONSISTENT) {
         // Warn about calls not in the global scope.
         compiler.report(t.makeError(n, NON_GLOBAL_ID_GENERATOR_CALL));
         return;
@@ -339,6 +353,19 @@ class ReplaceIdGenerators implements CompilerPass {
         compiler.reportCodeChange();
       } else if (arg.isObjectLit()) {
         for (Node key : arg.children()) {
+          if (key.isMemberFunctionDef()) {
+            compiler.report(t.makeError(n, SHORTHAND_FUNCTION_NOT_SUPPORTED_IN_ID_GEN));
+            return;
+          }
+          if (key.isStringKey() && !key.hasChildren()) {
+            compiler.report(t.makeError(n, SHORTHAND_ASSIGNMENT_NOT_SUPPORTED_IN_ID_GEN));
+            return;
+          }
+          if (key.isComputedProp()) {
+            compiler.report(t.makeError(n, COMPUTED_PROP_NOT_SUPPORTED_IN_ID_GEN));
+            return;
+          }
+
           String rename = getObfuscatedName(
               key, callName, nameGenerator, key.getString());
           key.setString(rename);
@@ -380,84 +407,7 @@ class ReplaceIdGenerators implements CompilerPass {
    *     replacements.
    */
   public String getSerializedIdMappings() {
-    StringBuilder sb = new StringBuilder();
-    for (Map.Entry<String, Map<String, String>> replacements :
-        idGeneratorMaps.entrySet()) {
-      if (!replacements.getValue().isEmpty()) {
-        sb.append("[");
-        sb.append(replacements.getKey());
-        sb.append("]\n\n");
-        for (Map.Entry<String, String> replacement :
-            replacements.getValue().entrySet()) {
-          sb.append(replacement.getKey());
-          sb.append(':');
-          sb.append(replacement.getValue());
-          sb.append("\n");
-        }
-        sb.append("\n");
-      }
-    }
-    return sb.toString();
-  }
-
-  private Map<String, BiMap<String, String>> parsePreviousResults(
-      String serializedMap) {
-
-    //
-    // The expected format looks like this:
-    //
-    // [generatorName]
-    // someId:someFile:theLine:theColumn
-    //
-    //
-
-    if (serializedMap == null || serializedMap.isEmpty()) {
-      return Collections.emptyMap();
-    }
-
-    Map<String, BiMap<String, String>> resultMap = Maps.newHashMap();
-    BufferedReader reader = new BufferedReader(new StringReader(serializedMap));
-    BiMap<String, String> currentSectionMap = null;
-
-    String line;
-    int lineIndex = 0;
-    try {
-      while ((line = reader.readLine()) != null) {
-        lineIndex++;
-        if (line.isEmpty()) {
-          continue;
-        }
-        if (line.charAt(0) == '[') {
-          String currentSection = line.substring(1, line.length() - 1);
-          currentSectionMap = resultMap.get(currentSection);
-          if (currentSectionMap == null) {
-            currentSectionMap = HashBiMap.create();
-            resultMap.put(currentSection, currentSectionMap);
-          } else {
-            reportInvalidLine(line, lineIndex);
-            return Collections.emptyMap();
-          }
-        } else {
-          int split = line.indexOf(':');
-          if (split != -1) {
-            String name = line.substring(0, split);
-            String location = line.substring(split + 1, line.length());
-            currentSectionMap.put(name, location);
-          } else {
-            reportInvalidLine(line, lineIndex);
-            return Collections.emptyMap();
-          }
-        }
-      }
-    } catch (IOException e) {
-      JSError.make(INVALID_GENERATOR_ID_MAPPING, e.getMessage());
-    }
-    return resultMap;
-  }
-
-  private static void reportInvalidLine(String line, int lineIndex) {
-    JSError.make(INVALID_GENERATOR_ID_MAPPING,
-        "line(" + line + "): " + lineIndex);
+    return IdMappingUtil.generateSerializedIdMappings(idGeneratorMaps);
   }
 
   static String getIdForGeneratorNode(boolean consistent, Node n) {

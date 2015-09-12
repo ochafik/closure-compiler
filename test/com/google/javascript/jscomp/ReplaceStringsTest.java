@@ -16,9 +16,11 @@
 
 package com.google.javascript.jscomp;
 
+import static com.google.common.truth.Truth.assertThat;
+
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
 import com.google.javascript.jscomp.ReplaceStrings.Result;
 import com.google.javascript.rhino.Node;
 
@@ -32,20 +34,23 @@ import java.util.Set;
  * Tests for {@link ReplaceStrings}.
  *
  */
-public class ReplaceStringsTest extends CompilerTestCase {
+public final class ReplaceStringsTest extends CompilerTestCase {
   private ReplaceStrings pass;
   private Set<String> reserved;
   private VariableMap previous;
   private boolean runDisambiguateProperties = false;
 
-  private final List<String> functionsToInspect = Lists.newArrayList(
+  private final ImmutableList<String> defaultFunctionsToInspect = ImmutableList.of(
       "Error(?)",
       "goog.debug.Trace.startTracer(*)",
       "goog.debug.Logger.getLogger(?)",
       "goog.debug.Logger.prototype.info(?)",
       "goog.log.getLogger(?)",
-      "goog.log.info(,?)"
+      "goog.log.info(,?)",
+      "goog.log.multiString(,?,?,)"
       );
+
+  private ImmutableList<String> functionsToInspect;
 
   private static final String EXTERNS =
     "var goog = {};\n" +
@@ -63,7 +68,8 @@ public class ReplaceStringsTest extends CompilerTestCase {
     "goog.debug.Logger.getLogger = function(name){};\n" +
     "goog.log = {}\n" +
     "goog.log.getLogger = function(name){};\n" +
-    "goog.log.info = function(logger, msg, opt_ex) {};\n"
+    "goog.log.info = function(logger, msg, opt_ex) {};\n" +
+    "goog.log.multiString = function(logger, replace1, replace2, keep) {};\n"
     ;
 
   public ReplaceStringsTest() {
@@ -86,6 +92,7 @@ public class ReplaceStringsTest extends CompilerTestCase {
     super.setUp();
     super.enableLineNumberCheck(false);
     super.enableTypeCheck(CheckLevel.WARNING);
+    functionsToInspect = defaultFunctionsToInspect;
     reserved = Collections.emptySet();
     previous = null;
   }
@@ -96,24 +103,23 @@ public class ReplaceStringsTest extends CompilerTestCase {
         compiler, "`", functionsToInspect, reserved, previous);
 
     return new CompilerPass() {
-        @Override
-        public void process(Node externs, Node js) {
-          Map<String, CheckLevel> propertiesToErrorFor = new HashMap<>();
-          propertiesToErrorFor.put("foobar", CheckLevel.ERROR);
+      @Override
+      public void process(Node externs, Node js) {
+        Map<String, CheckLevel> propertiesToErrorFor = new HashMap<>();
+        propertiesToErrorFor.put("foobar", CheckLevel.ERROR);
 
-          new CollapseProperties(compiler, true, true).process(externs, js);
-          if (runDisambiguateProperties) {
-            SourceInformationAnnotator sia =
-                new SourceInformationAnnotator(
-                    "test", false /* doSanityChecks */);
-            NodeTraversal.traverse(compiler, js, sia);
+        new CollapseProperties(compiler, true).process(externs, js);
+        if (runDisambiguateProperties) {
+          SourceInformationAnnotator sia =
+              new SourceInformationAnnotator("test", false /* doSanityChecks */);
+          NodeTraversal.traverseEs6(compiler, js, sia);
 
-            DisambiguateProperties.forJSTypeSystem(
-                compiler, propertiesToErrorFor).process(externs, js);
-          }
-          pass.process(externs, js);
+          DisambiguateProperties.forJSTypeSystem(compiler, propertiesToErrorFor)
+              .process(externs, js);
         }
-      };
+        pass.process(externs, js);
+      }
+    };
   }
 
   @Override
@@ -437,10 +443,28 @@ public class ReplaceStringsTest extends CompilerTestCase {
             "b", "Some message"});
   }
 
+  public void testLoggerWithSomeParametersNotReplaced() {
+    testDebugStrings(
+        "var x = {};" +
+        "x.logger_ = goog.log.getLogger('foo');" +
+        "goog.log.multiString(x.logger_, 'Some message', 'Some message2', " +
+            "'Do not replace');",
+        "var x$logger_ = goog.log.getLogger('a');" +
+        "goog.log.multiString(x$logger_, 'b', 'c', 'Do not replace');",
+        new String[] {
+            "a", "foo",
+            "b", "Some message",
+            "c", "Some message2"});
+  }
+
   public void testWithDisambiguateProperties() throws Exception {
     runDisambiguateProperties = true;
-    functionsToInspect.add("A.prototype.f(?)");
-    functionsToInspect.add("C.prototype.f(?)");
+
+    ImmutableList.Builder<String> builder = ImmutableList.builder();
+    builder.addAll(defaultFunctionsToInspect);
+    builder.add("A.prototype.f(?)");
+    builder.add("C.prototype.f(?)");
+    functionsToInspect = builder.build();
 
     String js =
         "/** @constructor */function A() {}\n"
@@ -485,7 +509,7 @@ public class ReplaceStringsTest extends CompilerTestCase {
 
     List<Result> results = pass.getResult();
     assertEquals(0, substitutedStrings.length % 2);
-    assertEquals(substitutedStrings.length / 2, results.size());
+    assertThat(results).hasSize(substitutedStrings.length / 2);
 
     // Verify that substituted strings are decoded correctly.
     for (int i = 0; i < substitutedStrings.length; i += 2) {

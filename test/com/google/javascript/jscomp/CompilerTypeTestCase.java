@@ -17,6 +17,8 @@
 
 package com.google.javascript.jscomp;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.google.common.base.Joiner;
 import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 import com.google.javascript.rhino.testing.BaseJSTypeTestCase;
@@ -63,48 +65,74 @@ abstract class CompilerTypeTestCase extends BaseJSTypeTestCase {
       "goog.asserts = {};" +
       "/** @return {*} */ goog.asserts.assert = function(x) { return x; };";
 
+  /** A default set of externs for testing structural interface matching*/
+  private static final Joiner lineJoiner = Joiner.on("\n");
+  private static final String INTERFACE_DEFAULT_EXTERNS = lineJoiner.join(
+      "/**",
+      " * @interface",
+      " * @template KEY1, VALUE1",
+      " */",
+      "function IObject() {};",
+      "/**",
+      " * @interface",
+      " * @extends IObject<number, VALUE2>",
+      " * @template VALUE2",
+      " */",
+      "function IArrayLike() {};",
+      "/**",
+      " * @type{number}",
+      " */",
+      "IArrayLike.prototype.length;");
+
   /** A default set of externs for testing. */
   static final String DEFAULT_EXTERNS =
-      "/**\n" +
-      " * @constructor\n" +
-      " * @param {*=} opt_value\n" +
-      " * @return {!Object}\n" +
-      " */\n" +
-      "function Object(opt_value) {}" +
-      "/** @constructor \n * @param {*} var_args */ " +
-      "function Function(var_args) {}" +
-      "/** @type {!Function} */ Function.prototype.apply;" +
-      "/** @type {!Function} */ Function.prototype.bind;" +
-      "/** @type {!Function} */ Function.prototype.call;" +
-      "/** @constructor \n * @param {*=} arg \n @return {string} */" +
-      "function String(arg) {}" +
-      "/** @param {number} sliceArg */\n" +
-      "String.prototype.slice = function(sliceArg) {};" +
-      "/** @type {number} */ String.prototype.length;" +
-      "/**\n" +
-      " * @template T\n" +
-      " * @constructor\n" +
-      " * @param {*} var_args\n" +
-      " * @return {!Array.<?>}\n" +
-      " */\n" +
-      "function Array(var_args) {}\n" +
-      "/** @type {number} */ Array.prototype.length;\n" +
-      "/**\n" +
-      " * @param {...T} var_args\n" +
-      " * @return {number} The new length of the array.\n" +
-      " * @this {{length: number}|Array.<T>}\n" +
-      " * @template T\n" +
-      " * @modifies {this}\n" +
-      " */\n" +
-      "Array.prototype.push = function(var_args) {};" +
-      "/** @constructor */\n" +
-      "function Arguments() {}\n" +
-      "/** @type {number} */\n" +
-      "Arguments.prototype.length;\n" +
-      "/** @type {!Arguments} */\n" +
-      "var arguments;" +
-      "" + ACTIVE_X_OBJECT_DEF +
-      "/** @type {?} */ var unknown;"; // For producing unknowns in tests.
+      lineJoiner.join(
+          "/**",
+          " * @constructor",
+          " * @param {*=} opt_value",
+          " * @return {!Object}",
+          " */",
+          "function Object(opt_value) {}",
+          "Object.defineProperties = function(obj, descriptors) {};",
+          "/** @constructor",
+          " * @param {*} var_args */ ",
+          "function Function(var_args) {}",
+          "/** @type {!Function} */ Function.prototype.apply;",
+          "/** @type {!Function} */ Function.prototype.bind;",
+          "/** @type {!Function} */ Function.prototype.call;",
+          "/** @constructor",
+          " * @param {*=} arg",
+          " * @return {string} */",
+          "function String(arg) {}",
+          "/** @param {number} sliceArg */",
+          "String.prototype.slice = function(sliceArg) {};",
+          "/** @type {number} */ String.prototype.length;",
+          "/**",
+          " * @template T",
+          " * @constructor",
+          " * @param {*} var_args",
+          " * @return {!Array.<?>}",
+          " */",
+          "function Array(var_args) {}",
+          "/** @type {number} */ Array.prototype.length;",
+          "/**",
+          " * @param {...T} var_args",
+          " * @return {number} The new length of the array.",
+          " * @this {{length: number}|Array.<T>}",
+          " * @template T",
+          " * @modifies {this}",
+          " */",
+          "Array.prototype.push = function(var_args) {};",
+          "/** @constructor */",
+          "function Arguments() {}",
+          "/** @type {number} */",
+          "Arguments.prototype.length;",
+          "/** @type {!Arguments} */",
+          "var arguments;",
+          "",
+          ACTIVE_X_OBJECT_DEF,
+          "/** @type {?} */ var unknown;", // For producing unknowns in tests.
+          INTERFACE_DEFAULT_EXTERNS);
 
   protected Compiler compiler;
 
@@ -117,6 +145,7 @@ abstract class CompilerTypeTestCase extends BaseJSTypeTestCase {
         DiagnosticGroups.MISPLACED_TYPE_ANNOTATION, CheckLevel.WARNING);
     options.setWarningLevel(
         DiagnosticGroups.INVALID_CASTS, CheckLevel.WARNING);
+    options.setWarningLevel(DiagnosticGroups.LINT_CHECKS, CheckLevel.WARNING);
     options.setCodingConvention(getCodingConvention());
     return options;
   }
@@ -127,12 +156,14 @@ abstract class CompilerTypeTestCase extends BaseJSTypeTestCase {
 
   protected void checkReportedWarningsHelper(String[] expected) {
     JSError[] warnings = compiler.getWarnings();
-    for (int i = 0; i < expected.length; i++) {
-      if (expected[i] != null) {
-        assertTrue("expected a warning", warnings.length > 0);
-        assertEquals(expected[i], warnings[0].description);
-        warnings = Arrays.asList(warnings).subList(1, warnings.length).toArray(
-            new JSError[warnings.length - 1]);
+    for (String element : expected) {
+      if (element != null) {
+        assertThat(warnings.length).named("Number of warnings").isGreaterThan(0);
+        assertThat(warnings[0].description).isEqualTo(element);
+        warnings =
+            Arrays.asList(warnings)
+                .subList(1, warnings.length)
+                .toArray(new JSError[warnings.length - 1]);
       }
     }
     if (warnings.length > 0) {

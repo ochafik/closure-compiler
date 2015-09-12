@@ -16,6 +16,8 @@
 
 package com.google.javascript.jscomp;
 
+import com.google.common.annotations.GwtIncompatible;
+
 import java.io.PrintStream;
 import java.lang.management.CompilationMXBean;
 import java.lang.management.GarbageCollectorMXBean;
@@ -31,6 +33,7 @@ import java.util.StringTokenizer;
  * Borrowed from:
  * http://code.google.com/p/dart/source/browse/trunk/dart/compiler/java/com/google/dart/compiler/metrics/JvmMetrics.java
  */
+@GwtIncompatible("Unneccesary")
 class JvmMetrics {
 
   private static final int TABULAR_COLON_POS = 40;
@@ -104,8 +107,7 @@ class JvmMetrics {
 
     if (pretty) {
       out.println("\nJIT Stats");
-      out.println(String.format(
-          "\t%s jit time: %d ms", name, cBean.getTotalCompilationTime()));
+      out.printf("\t%s jit time: %d ms%n", name, cBean.getTotalCompilationTime());
     } else {
       out.println(normalizeTabularColonPos(String.format("%s-jit-time-ms : %d",
           normalizeName(name), cBean.getTotalCompilationTime())));
@@ -249,7 +251,7 @@ class JvmMetrics {
   }
 
   private static String normalizeName(String name) {
-    return name.replace(" ", "_").toLowerCase();
+    return name.replace(' ', '_').toLowerCase();
   }
 
   private static String normalizeTabularColonPos(String string) {

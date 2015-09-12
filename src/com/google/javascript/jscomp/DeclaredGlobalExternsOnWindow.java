@@ -45,12 +45,12 @@ class DeclaredGlobalExternsOnWindow
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, externs, this);
+    NodeTraversal.traverseEs6(compiler, externs, this);
     addWindowProperties();
   }
 
   private void addWindowProperties() {
-    if (nodes.size() > 0 && windowInExterns) {
+    if (!nodes.isEmpty() && windowInExterns) {
       for (Node node : nodes) {
         addExtern(node);
       }
@@ -70,7 +70,7 @@ class DeclaredGlobalExternsOnWindow
     if (oldJSDocInfo != null) {
       JSDocInfoBuilder builder;
 
-      if (oldJSDocInfo.isConstructor() || oldJSDocInfo.isInterface()
+      if (oldJSDocInfo.isConstructorOrInterface()
           || oldJSDocInfo.hasEnumParameterType()
           || NodeUtil.isNamespaceDecl(node)) {
         Node nameNode = IR.name(name);
@@ -83,6 +83,9 @@ class DeclaredGlobalExternsOnWindow
         if (oldJSDocInfo.isInterface()) {
           builder.recordInterface();
         }
+        if (oldJSDocInfo.usesImplicitMatch()) {
+          builder.recordImplicitMatch();
+        }
         if (oldJSDocInfo.hasEnumParameterType()) {
           builder.recordEnumParameterType(oldJSDocInfo.getEnumParameterType());
         }
@@ -91,8 +94,7 @@ class DeclaredGlobalExternsOnWindow
       }
 
       builder.recordSuppressions(ImmutableSet.of("duplicate"));
-      JSDocInfo jsDocInfo = builder.build(newNode);
-      jsDocInfo.setAssociatedNode(newNode);
+      JSDocInfo jsDocInfo = builder.build();
       newNode.setJSDocInfo(jsDocInfo);
     }
 

@@ -20,14 +20,13 @@ package com.google.javascript.jscomp;
  * Unit tests for {@link StatementFusion}.
  *
  */
-public class StatementFusionTest extends CompilerTestCase  {
+public final class StatementFusionTest extends CompilerTestCase  {
 
   private boolean favorsCommas = false;
 
   @Override
   public void setUp() throws Exception {
     super.setUp();
-    enableLineNumberCheck(true);
     favorsCommas = false;
   }
 

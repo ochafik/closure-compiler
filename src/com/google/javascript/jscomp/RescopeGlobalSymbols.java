@@ -16,8 +16,6 @@
 package com.google.javascript.jscomp;
 
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
 import com.google.javascript.jscomp.NodeTraversal.AbstractShallowStatementCallback;
 import com.google.javascript.jscomp.NodeTraversal.Callback;
@@ -25,6 +23,7 @@ import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.Node;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -64,8 +63,8 @@ final class RescopeGlobalSymbols implements CompilerPass {
   private final String globalSymbolNamespace;
   private final boolean addExtern;
   private final boolean assumeCrossModuleNames;
-  private final Set<String> crossModuleNames = Sets.newHashSet();
-  private final Set<String> maybeReferencesThis = Sets.newHashSet();
+  private final Set<String> crossModuleNames = new HashSet<>();
+  private final Set<String> maybeReferencesThis = new HashSet<>();
 
   /**
    * Constructor for the RescopeGlobalSymbols compiler pass.
@@ -107,7 +106,8 @@ final class RescopeGlobalSymbols implements CompilerPass {
   }
 
   private boolean isCrossModuleName(String name) {
-    return assumeCrossModuleNames || crossModuleNames.contains(name);
+    return assumeCrossModuleNames || crossModuleNames.contains(name)
+        || compiler.getCodingConvention().isExported(name, false);
   }
 
   private void addExternForGlobalSymbolNamespace() {
@@ -129,7 +129,7 @@ final class RescopeGlobalSymbols implements CompilerPass {
     // (If necessary the 4 traversals could be combined. They are left
     // separate for readability reasons.)
     // 1. turning global named function statements into var assignments.
-    NodeTraversal.traverse(
+    NodeTraversal.traverseEs6(
         compiler,
         root,
         new RewriteGlobalFunctionStatementsToVarAssignmentsCallback());
@@ -142,15 +142,15 @@ final class RescopeGlobalSymbols implements CompilerPass {
     CombinedCompilerPass.traverse(compiler, root, nonMutatingPasses);
     // 3. rewriting all references to be property accesses of the single symbol.
     RewriteScopeCallback rewriteScope = new RewriteScopeCallback();
-    NodeTraversal.traverse(compiler, root, rewriteScope);
+    NodeTraversal.traverseEs6(compiler, root, rewriteScope);
     // 4. removing the var from statements in global scope if the declared names
     //    have been rewritten in the previous pass.
-    NodeTraversal.traverse(compiler, root, new RemoveGlobalVarCallback());
+    NodeTraversal.traverseEs6(compiler, root, new RemoveGlobalVarCallback());
     rewriteScope.declareModuleGlobals();
 
     // Extra pass which makes all extern global symbols reference window
     // explicitly.
-    NodeTraversal.traverse(
+    NodeTraversal.traverseEs6(
         compiler,
         root,
         new MakeExternsReferenceWindowExplicitly());
@@ -200,7 +200,7 @@ final class RescopeGlobalSymbols implements CompilerPass {
           return;
         }
         Scope s = t.getScope();
-        Scope.Var v = s.getVar(name);
+        Var v = s.getVar(name);
         if (v == null || !v.isGlobal()) {
           return;
         }
@@ -252,7 +252,7 @@ final class RescopeGlobalSymbols implements CompilerPass {
           return;
         }
         Scope s = t.getScope();
-        Scope.Var v = s.getVar(name);
+        Var v = s.getVar(name);
         if (v == null || !v.isGlobal()) {
           return;
         }
@@ -288,7 +288,7 @@ final class RescopeGlobalSymbols implements CompilerPass {
    */
   private class RewriteScopeCallback extends AbstractPostOrderCallback {
 
-    List<ModuleGlobal> preDeclarations = Lists.newArrayList();
+    List<ModuleGlobal> preDeclarations = new ArrayList<>();
 
     @Override
     public void visit(NodeTraversal t, Node n, Node parent) {
@@ -300,7 +300,7 @@ final class RescopeGlobalSymbols implements CompilerPass {
       if (parent.isFunction() && name.isEmpty()) {
         return;
       }
-      Scope.Var var = t.getScope().getVar(name);
+      Var var = t.getScope().getVar(name);
       if (var == null) {
         return;
       }
@@ -398,7 +398,8 @@ final class RescopeGlobalSymbols implements CompilerPass {
      */
     void declareModuleGlobals() {
       for (ModuleGlobal global : preDeclarations) {
-        if (global.root.getFirstChild().isVar()) {
+        if (global.root.getFirstChild() != null
+            && global.root.getFirstChild().isVar()) {
           global.root.getFirstChild().addChildToBack(global.name);
         } else {
           global.root.addChildToFront(
@@ -476,7 +477,7 @@ final class RescopeGlobalSymbols implements CompilerPass {
           parent.addChildBefore(expr, n);
         }
       }
-      if (commas.size() > 0) {
+      if (!commas.isEmpty()) {
         Node comma = joinOnComma(commas, n);
         parent.addChildBefore(comma, n);
       }
@@ -489,7 +490,7 @@ final class RescopeGlobalSymbols implements CompilerPass {
       Node comma = commas.get(0);
       for (int i = 1; i < commas.size(); i++) {
         Node nextComma = IR.comma(comma, commas.get(i));
-        nextComma.copyInformationFrom(source);
+        nextComma.useSourceInfoIfMissingFrom(source);
         comma = nextComma;
       }
       return comma;
@@ -515,7 +516,7 @@ final class RescopeGlobalSymbols implements CompilerPass {
           || SPECIAL_EXTERNS.contains(name)) {
         return;
       }
-      Scope.Var var = t.getScope().getVar(name);
+      Var var = t.getScope().getVar(name);
       if (name.length() > 0 && (var == null || var.isExtern())) {
         parent.replaceChild(n, IR.getprop(IR.name(WINDOW), IR.string(name))
             .srcrefTree(n));

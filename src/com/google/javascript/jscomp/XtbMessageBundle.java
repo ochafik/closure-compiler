@@ -16,9 +16,9 @@
 
 package com.google.javascript.jscomp;
 
+import com.google.common.annotations.GwtIncompatible;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Maps;
 
 import org.xml.sax.Attributes;
 import org.xml.sax.ContentHandler;
@@ -31,6 +31,7 @@ import org.xml.sax.XMLReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringReader;
+import java.util.HashMap;
 import java.util.Map;
 
 import javax.annotation.Nullable;
@@ -43,9 +44,12 @@ import javax.xml.parsers.SAXParserFactory;
  * A MessageBundle that parses messages from an XML Translation Bundle (XTB)
  * file.
  *
+ * TODO(moz): Make this GWT compatible.
+ *
  */
+@GwtIncompatible("Currently not used in GWT version")
 @SuppressWarnings("sunapi")
-public class XtbMessageBundle implements MessageBundle {
+public final class XtbMessageBundle implements MessageBundle {
   private static final SecureEntityResolver NOOP_RESOLVER
       = new SecureEntityResolver();
 
@@ -66,7 +70,7 @@ public class XtbMessageBundle implements MessageBundle {
    */
   public XtbMessageBundle(InputStream xtb, @Nullable String projectId) {
     Preconditions.checkState(!"".equals(projectId));
-    this.messages = Maps.newHashMap();
+    this.messages = new HashMap<>();
     this.idGenerator = new GoogleJsMessageIdGenerator(projectId);
 
     try {

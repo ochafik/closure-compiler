@@ -16,12 +16,15 @@
 
 package com.google.javascript.jscomp.newtypes;
 
+import com.google.common.annotations.GwtIncompatible;
+
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.Set;
 
 /** A persistent map that simply wraps Clojure's implementation */
-public class ClojurePersistentHashMap<K, V> extends PersistentMap<K, V> {
+@GwtIncompatible("java.lang.reflect")
+final class ClojurePersistentHashMap<K, V> extends PersistentMap<K, V> {
   private static Method assoc;
   private static Method without;
   private final Map map;
@@ -60,11 +63,13 @@ public class ClojurePersistentHashMap<K, V> extends PersistentMap<K, V> {
   }
 
   @Override
+  @SuppressWarnings("unchecked")
   public V get(Object key) {
     return (V) this.map.get(key);
   }
 
   @Override
+  @SuppressWarnings("unchecked")
   public Set<K> keySet() {
     return this.map.keySet();
   }
@@ -75,6 +80,7 @@ public class ClojurePersistentHashMap<K, V> extends PersistentMap<K, V> {
   }
 
   @Override
+  @SuppressWarnings("unchecked")
   public Set<Map.Entry<K, V>> entrySet() {
     return this.map.entrySet();
   }

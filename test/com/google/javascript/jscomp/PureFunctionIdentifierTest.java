@@ -16,12 +16,15 @@
 
 package com.google.javascript.jscomp;
 
+import static com.google.common.truth.Truth.assertThat;
 import static com.google.javascript.jscomp.PureFunctionIdentifier.INVALID_NO_SIDE_EFFECT_ANNOTATION;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
+import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
 import com.google.javascript.rhino.Node;
+
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -30,15 +33,15 @@ import java.util.List;
  * @author johnlenz@google.com (John Lenz)
  */
 
-public class PureFunctionIdentifierTest extends CompilerTestCase {
-  List<String> noSideEffectCalls = Lists.newArrayList();
-  List<String> localResultCalls = Lists.newArrayList();
+public final class PureFunctionIdentifierTest extends CompilerTestCase {
+  List<String> noSideEffectCalls = new ArrayList<>();
+  List<String> localResultCalls = new ArrayList<>();
 
   boolean regExpHaveSideEffects = true;
 
   private static String kExterns =
-      CompilerTypeTestCase.DEFAULT_EXTERNS +
-      "var window; window.setTimeout;" +
+      CompilerTypeTestCase.DEFAULT_EXTERNS
+      + "var window; window.setTimeout;" +
       "/**@nosideeffects*/ function externSENone(){}\n" +
 
       "/**@modifies{this}*/ function externSEThis(){}\n" +
@@ -499,7 +502,7 @@ public class PureFunctionIdentifierTest extends CompilerTestCase {
     testSame(externs,
         "o.prototype.propWithAnnotatedStubAfter",
         TypeValidator.DUP_VAR_DECLARATION_TYPE_MISMATCH, false);
-    assertTrue(noSideEffectCalls.isEmpty());
+    assertThat(noSideEffectCalls).isEmpty();
     noSideEffectCalls.clear();
   }
 
@@ -809,6 +812,14 @@ public class PureFunctionIdentifierTest extends CompilerTestCase {
         ImmutableList.of("A", "B"));
   }
 
+  public void testLocalizedSideEffects12() throws Exception {
+    // An array is an local object, assigning a local array is not a global
+    // side-effect. This tests the behavior if the access is in a block scope.
+    checkMarkedCalls("function f() {var x = []; { x[0] = 1; } }" +
+                     "f()",
+                     ImmutableList.of("f"));
+  }
+
   public void testUnaryOperators1() throws Exception {
     checkMarkedCalls("function f() {var x = 1; x++}" +
                      "f()",
@@ -1093,6 +1104,18 @@ public class PureFunctionIdentifierTest extends CompilerTestCase {
     checkMarkedCalls(source, ImmutableList.of("f", "g"));
   }
 
+  public void testMutatesArguments5() throws Exception {
+    String source = LINE_JOINER.join(
+        "function f(x) {",
+        "  function g() {",
+        "    x.prop = 5;",
+        "  }",
+        "  g();",
+        "}",
+        "f(window);");
+    checkMarkedCalls(source, ImmutableList.<String>of());
+  }
+
   public void testMutatesArgumentsArray1() throws Exception {
     // We could be smarter here.
     String source = "function f(x) { arguments[0] = 1; }\n" +
@@ -1230,39 +1253,48 @@ public class PureFunctionIdentifierTest extends CompilerTestCase {
   }
 
   public void testInvalidAnnotation1() throws Exception {
-    test("/** @nosideeffects */ function foo() {}",
-         null, INVALID_NO_SIDE_EFFECT_ANNOTATION);
+    testError("/** @nosideeffects */ function foo() {}", INVALID_NO_SIDE_EFFECT_ANNOTATION);
   }
 
   public void testInvalidAnnotation2() throws Exception {
-    test("var f = /** @nosideeffects */ function() {}",
-         null, INVALID_NO_SIDE_EFFECT_ANNOTATION);
+    testError("var f = /** @nosideeffects */ function() {}", INVALID_NO_SIDE_EFFECT_ANNOTATION);
   }
 
   public void testInvalidAnnotation3() throws Exception {
-    test("/** @nosideeffects */ var f = function() {}",
-         null, INVALID_NO_SIDE_EFFECT_ANNOTATION);
+    testError("/** @nosideeffects */ var f = function() {}", INVALID_NO_SIDE_EFFECT_ANNOTATION);
   }
 
   public void testInvalidAnnotation4() throws Exception {
-    test("var f = function() {};" +
+    testError("var f = function() {};" +
          "/** @nosideeffects */ f.x = function() {}",
-         null, INVALID_NO_SIDE_EFFECT_ANNOTATION);
+         INVALID_NO_SIDE_EFFECT_ANNOTATION);
   }
 
   public void testInvalidAnnotation5() throws Exception {
-    test("var f = function() {};" +
+    testError("var f = function() {};" +
          "f.x = /** @nosideeffects */ function() {}",
-         null, INVALID_NO_SIDE_EFFECT_ANNOTATION);
+         INVALID_NO_SIDE_EFFECT_ANNOTATION);
   }
 
   void checkMarkedCalls(String source, List<String> expected) {
+    checkMarkedCalls(source, expected, LanguageMode.ECMASCRIPT6);
+    checkMarkedCalls(source, expected, LanguageMode.ECMASCRIPT5);
+  }
+
+  void checkMarkedCalls(String source, List<String> expected, LanguageMode mode) {
+    setAcceptedLanguage(mode);
     testSame(source);
     assertEquals(expected, noSideEffectCalls);
     noSideEffectCalls.clear();
   }
 
   void checkLocalityOfMarkedCalls(String source, List<String> expected) {
+    checkLocalityOfMarkedCalls(source, expected, LanguageMode.ECMASCRIPT6);
+    checkLocalityOfMarkedCalls(source, expected, LanguageMode.ECMASCRIPT5);
+  }
+
+  void checkLocalityOfMarkedCalls(String source, List<String> expected, LanguageMode mode) {
+    setAcceptedLanguage(mode);
     testSame(source);
     assertEquals(expected, localResultCalls);
     localResultCalls.clear();
@@ -1297,8 +1329,8 @@ public class PureFunctionIdentifierTest extends CompilerTestCase {
       // Ensure that debug report computation doesn't crash.
       passUnderTest.getDebugReport();
 
-      NodeTraversal.traverse(compiler, externs, this);
-      NodeTraversal.traverse(compiler, root, this);
+      NodeTraversal.traverseEs6(compiler, externs, this);
+      NodeTraversal.traverseEs6(compiler, root, this);
     }
 
     @Override

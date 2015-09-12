@@ -21,7 +21,7 @@ package com.google.javascript.jscomp;
  * Ensures that the InlineVariables pass in constants-only mode
  * is functionally equivalent to the old InlineVariablesConstants pass.
  */
-public class InlineVariablesConstantsTest extends CompilerTestCase {
+public final class InlineVariablesConstantsTest extends CompilerTestCase {
 
   private boolean inlineAllStrings = false;
 
@@ -85,7 +85,7 @@ public class InlineVariablesConstantsTest extends CompilerTestCase {
     // Note that inlining conditionally defined constants can change the
     // run-time behavior of code (e.g. when y is true and x is false in the
     // example below). We inline them anyway because if the code author didn't
-    // want one inlined, he/she could define it as a non-const variable instead.
+    // want one inlined, they could define it as a non-const variable instead.
     test("if (x) var ABC = 2; if (y) f(ABC);",
          "if (x); if (y) f(2);");
   }

@@ -17,7 +17,7 @@
 package com.google.javascript.jscomp;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
+import com.google.common.collect.Iterables;
 import com.google.javascript.jscomp.NameReferenceGraph.Name;
 import com.google.javascript.jscomp.NameReferenceGraph.Reference;
 import com.google.javascript.jscomp.graph.DiGraph.DiGraphEdge;
@@ -25,6 +25,7 @@ import com.google.javascript.jscomp.graph.DiGraph.DiGraphNode;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.jstype.JSType;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -70,8 +71,8 @@ final class NameReferenceGraphReport {
    */
   public String getHtmlReport() {
     StringBuilder builder = new StringBuilder();
-    List<DiGraphNode<Name, Reference>> nodes = Lists.newArrayList(
-        graph.getDirectedGraphNodes());
+    List<DiGraphNode<Name, Reference>> nodes = new ArrayList<>();
+    Iterables.addAll(nodes, graph.getDirectedGraphNodes());
 
     generateHtmlReportHeader(builder);
 
@@ -103,7 +104,7 @@ final class NameReferenceGraphReport {
       if (!outEdges.isEmpty() || !inEdges.isEmpty()) {
         builder.append("<ul>");
 
-        if (outEdges.size() > 0) {
+        if (!outEdges.isEmpty()) {
           builder.append("<li>REFERS TO:<br>\n");
           builder.append("<ul>");
           for (DiGraphEdge<Name, Reference> edge : outEdges) {
@@ -113,7 +114,7 @@ final class NameReferenceGraphReport {
           builder.append("</ul>\n");
         }
 
-        if (inEdges.size() > 0) {
+        if (!inEdges.isEmpty()) {
           builder.append("<li>REFERENCED BY:<br>\n");
           builder.append("<ul>");
           for (DiGraphEdge<Name, Reference> edge : inEdges) {
@@ -280,8 +281,7 @@ final class NameReferenceGraphReport {
     } else if (defType.isUnknownType()) {
       builder.append(" (type: unknown) ");
     } else {
-      builder.append(" (type: " +
-          defType.toString() + ") ");
+      builder.append(" (type: " + defType + ") ");
     }
   }
 

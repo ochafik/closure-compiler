@@ -18,11 +18,11 @@ package com.google.javascript.jscomp;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Supplier;
-import com.google.common.collect.Lists;
 import com.google.javascript.jscomp.NodeTraversal.ScopedCallback;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
@@ -76,11 +76,6 @@ final class RenameLabels implements CompilerPass {
     this(compiler, new DefaultNameSupplier(), true);
   }
 
-  RenameLabels(final AbstractCompiler compiler, final NameGenerator nameGen) {
-    this(compiler, new DefaultNameSupplier(nameGen), true);
-    nameGen.restartNaming();
-  }
-
   RenameLabels(
       AbstractCompiler compiler,
       Supplier<String> supplier,
@@ -120,7 +115,7 @@ final class RenameLabels implements CompilerPass {
 
     // A stack of labels namespaces. Labels in an outer scope aren't part of an
     // inner scope, so a new namespace is created each time a scope is entered.
-    final Deque<LabelNamespace> namespaceStack = Lists.newLinkedList();
+    final Deque<LabelNamespace> namespaceStack = new ArrayDeque<>();
 
     // The list of generated names. Typically, the first name will be "a",
     // the second "b", etc.
@@ -130,12 +125,16 @@ final class RenameLabels implements CompilerPass {
     @Override
     public void enterScope(NodeTraversal nodeTraversal) {
       // Start a new namespace for label names.
-      namespaceStack.push(new LabelNamespace());
+      if (nodeTraversal.getScopeRoot().isFunction()) {
+        namespaceStack.push(new LabelNamespace());
+      }
     }
 
     @Override
     public void exitScope(NodeTraversal nodeTraversal) {
-      namespaceStack.pop();
+      if (nodeTraversal.getScopeRoot().isFunction()) {
+        namespaceStack.pop();
+      }
     }
 
     /**
@@ -268,7 +267,7 @@ final class RenameLabels implements CompilerPass {
   @Override
   public void process(Node externs, Node root) {
     // Do variable reference counting.
-    NodeTraversal.traverse(compiler, root, new ProcessLabels());
+    NodeTraversal.traverseEs6(compiler, root, new ProcessLabels());
   }
 
 

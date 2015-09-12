@@ -16,14 +16,13 @@
 
 package com.google.javascript.jscomp.deps;
 
+import com.google.common.annotations.GwtIncompatible;
 import com.google.common.base.CharMatcher;
-import com.google.common.collect.Lists;
 import com.google.javascript.jscomp.ErrorManager;
 
-import java.io.FileReader;
-import java.io.IOException;
 import java.io.Reader;
 import java.io.StringReader;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -35,7 +34,8 @@ import java.util.regex.Pattern;
  *
  * @author agrieve@google.com (Andrew Grieve)
  */
-public class JsFileParser extends JsFileLineParser {
+@GwtIncompatible("java.util.regex")
+public final class JsFileParser extends JsFileLineParser {
 
   private static Logger logger = Logger.getLogger(JsFileParser.class.getName());
 
@@ -91,21 +91,6 @@ public class JsFileParser extends JsFileLineParser {
    *
    * @param filePath Path to the file to parse.
    * @param closureRelativePath Path of the file relative to closure.
-   * @return A DependencyInfo containing all provides/requires found in the
-   *     file.
-   * @throws IOException Thrown if there was an problem reading the given file.
-   */
-  public DependencyInfo parseFile(String filePath, String closureRelativePath)
-      throws IOException {
-    return parseReader(filePath, closureRelativePath, new FileReader(filePath));
-  }
-
-  /**
-   * Parses the given file and returns the dependency information that it
-   * contained.
-   *
-   * @param filePath Path to the file to parse.
-   * @param closureRelativePath Path of the file relative to closure.
    * @param fileContents The contents to parse.
    * @return A DependencyInfo containing all provides/requires found in the
    *     file.
@@ -118,8 +103,8 @@ public class JsFileParser extends JsFileLineParser {
 
   private DependencyInfo parseReader(String filePath,
       String closureRelativePath, Reader fileContents) {
-    provides = Lists.newArrayList();
-    requires = Lists.newArrayList();
+    provides = new ArrayList<>();
+    requires = new ArrayList<>();
     fileHasProvidesOrRequires = false;
     fileIsModule = false;
 

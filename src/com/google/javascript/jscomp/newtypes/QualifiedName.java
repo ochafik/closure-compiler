@@ -15,6 +15,7 @@
  */
 package com.google.javascript.jscomp.newtypes;
 
+import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
@@ -28,7 +29,7 @@ import com.google.javascript.rhino.Node;
  * @author blickly@google.com (Ben Lickly)
  * @author dimvar@google.com (Dimitris Vardoulakis)
  */
-public class QualifiedName {
+public final class QualifiedName {
   ImmutableList<String> parts;
 
   private QualifiedName(ImmutableList<String> parts) {
@@ -54,7 +55,7 @@ public class QualifiedName {
               Splitter.on('.').split(qnameNode.getQualifiedName())));
   }
 
-  public static QualifiedName fromQname(String qname) {
+  public static QualifiedName fromQualifiedString(String qname) {
     return qname.contains(".") ?
         new QualifiedName(ImmutableList.copyOf(Splitter.on('.').split(qname))) :
         new QualifiedName(qname);
@@ -83,6 +84,6 @@ public class QualifiedName {
   }
 
   public String toString() {
-    return isIdentifier() ? parts.get(0).toString() : parts.toString();
+    return Joiner.on(".").join(parts);
   }
 }

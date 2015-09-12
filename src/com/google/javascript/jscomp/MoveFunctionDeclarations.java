@@ -17,10 +17,11 @@
 package com.google.javascript.jscomp;
 
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.javascript.jscomp.NodeTraversal.Callback;
 import com.google.javascript.rhino.Node;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -51,12 +52,12 @@ class MoveFunctionDeclarations implements Callback, CompilerPass {
 
   MoveFunctionDeclarations(AbstractCompiler compiler) {
     this.compiler = compiler;
-    functions = Maps.newHashMap();
+    functions = new HashMap<>();
   }
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, root, this);
+    NodeTraversal.traverseEs6(compiler, root, this);
     for (Entry<JSModule, List<Node>> entry : functions.entrySet()) {
       JSModule module = entry.getKey();
       Node addingRoot = compiler.getNodeForCodeInsertion(module);
@@ -68,8 +69,8 @@ class MoveFunctionDeclarations implements Callback, CompilerPass {
 
   @Override
   public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
-    Node gramps = n.getAncestor(2);
-    return gramps == null || !gramps.isScript();
+    Node grandparent = n.getAncestor(2);
+    return grandparent == null || !grandparent.isScript();
   }
 
   @Override
@@ -85,7 +86,7 @@ class MoveFunctionDeclarations implements Callback, CompilerPass {
       JSModule module = t.getModule();
       List<Node> moduleFunctions = functions.get(module);
       if (moduleFunctions == null) {
-        moduleFunctions = Lists.newArrayList();
+        moduleFunctions = new ArrayList<>();
         functions.put(module, moduleFunctions);
       }
       moduleFunctions.add(n);

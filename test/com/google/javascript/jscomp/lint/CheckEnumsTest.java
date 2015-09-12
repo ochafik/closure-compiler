@@ -17,6 +17,7 @@
 package com.google.javascript.jscomp.lint;
 
 import com.google.javascript.jscomp.Compiler;
+import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 import com.google.javascript.jscomp.CompilerPass;
 import com.google.javascript.jscomp.CompilerTestCase;
 import com.google.javascript.jscomp.DiagnosticType;
@@ -24,7 +25,7 @@ import com.google.javascript.jscomp.DiagnosticType;
 /**
  * Test case for {@link CheckEnums}.
  */
-public class CheckEnumsTest extends CompilerTestCase {
+public final class CheckEnumsTest extends CompilerTestCase {
   @Override
   public CompilerPass getProcessor(Compiler compiler) {
     return new CheckEnums(compiler);
@@ -44,6 +45,12 @@ public class CheckEnumsTest extends CompilerTestCase {
         CheckEnums.DUPLICATE_ENUM_VALUE);
     testSame("/** @enum {string} */ var Enum = {A: 'foo', B: 'foo'};",
         CheckEnums.DUPLICATE_ENUM_VALUE);
+
+    setAcceptedLanguage(LanguageMode.ECMASCRIPT6);
+    testSame("/** @enum {number} */ var Enum = {A};",
+        CheckEnums.SHORTHAND_ASSIGNMENT_IN_ENUM);
+    testSame("/** @enum {string} */ var Enum = {['prop' + f()]: 'foo'};",
+        CheckEnums.COMPUTED_PROP_NAME_IN_ENUM);
   }
 
   private void testOk(String js) {

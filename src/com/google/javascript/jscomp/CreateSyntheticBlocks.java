@@ -16,12 +16,12 @@
 
 package com.google.javascript.jscomp;
 
-import com.google.common.collect.Lists;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.Node;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 
@@ -34,13 +34,13 @@ import javax.annotation.Nullable;
  * @author johnlenz@google.com (John Lenz)
  */
 class CreateSyntheticBlocks implements CompilerPass {
-  static final DiagnosticType UNMATCHED_START_MARKER = DiagnosticType.warning(
+  static final DiagnosticType UNMATCHED_START_MARKER = DiagnosticType.error(
       "JSC_UNMATCHED_START_MARKER", "Unmatched {0}");
 
-  static final DiagnosticType UNMATCHED_END_MARKER = DiagnosticType.warning(
+  static final DiagnosticType UNMATCHED_END_MARKER = DiagnosticType.error(
       "JSC_UNMATCHED_END_MARKER", "Unmatched {1} - {0} not in the same block");
 
-  static final DiagnosticType INVALID_MARKER_USAGE = DiagnosticType.warning(
+  static final DiagnosticType INVALID_MARKER_USAGE = DiagnosticType.error(
       "JSC_INVALID_MARKER_USAGE", "Marker {0} can only be used in a simple "
            + "call expression");
 
@@ -57,7 +57,7 @@ class CreateSyntheticBlocks implements CompilerPass {
    */
   private final Deque<Node> markerStack = new ArrayDeque<>();
 
-  private final List<Marker> validMarkers = Lists.newArrayList();
+  private final List<Marker> validMarkers = new ArrayList<>();
 
   private static class Marker {
     final Node startMarker;
@@ -78,7 +78,7 @@ class CreateSyntheticBlocks implements CompilerPass {
   @Override
   public void process(Node externs, Node root) {
     // Find and validate the markers.
-    NodeTraversal.traverse(compiler, root, new Callback());
+    NodeTraversal.traverseEs6(compiler, root, new Callback());
 
     // Complain about any unmatched markers.
     for (Node node : markerStack) {

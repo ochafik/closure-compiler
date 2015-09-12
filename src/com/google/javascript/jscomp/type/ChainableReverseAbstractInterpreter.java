@@ -29,7 +29,6 @@ import static com.google.javascript.rhino.jstype.JSTypeNative.UNKNOWN_TYPE;
 import static com.google.javascript.rhino.jstype.JSTypeNative.VOID_TYPE;
 
 import com.google.common.base.Preconditions;
-import com.google.javascript.jscomp.CodingConvention;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 import com.google.javascript.rhino.jstype.EnumElementType;
@@ -41,7 +40,7 @@ import com.google.javascript.rhino.jstype.NamedType;
 import com.google.javascript.rhino.jstype.NoType;
 import com.google.javascript.rhino.jstype.ObjectType;
 import com.google.javascript.rhino.jstype.ProxyObjectType;
-import com.google.javascript.rhino.jstype.StaticSlot;
+import com.google.javascript.rhino.jstype.StaticTypedSlot;
 import com.google.javascript.rhino.jstype.TemplateType;
 import com.google.javascript.rhino.jstype.TemplatizedType;
 import com.google.javascript.rhino.jstype.UnionType;
@@ -53,7 +52,6 @@ import com.google.javascript.rhino.jstype.Visitor;
  */
 public abstract class ChainableReverseAbstractInterpreter
     implements ReverseAbstractInterpreter {
-  protected final CodingConvention convention;
   final JSTypeRegistry typeRegistry;
   private ChainableReverseAbstractInterpreter firstLink;
   private ChainableReverseAbstractInterpreter nextLink;
@@ -62,10 +60,7 @@ public abstract class ChainableReverseAbstractInterpreter
    * Constructs an interpreter, which is the only link in a chain. Interpreters
    * can be appended using {@link #append}.
    */
-  public ChainableReverseAbstractInterpreter(CodingConvention convention,
-      JSTypeRegistry typeRegistry) {
-    Preconditions.checkNotNull(convention);
-    this.convention = convention;
+  public ChainableReverseAbstractInterpreter(JSTypeRegistry typeRegistry) {
     this.typeRegistry = typeRegistry;
     firstLink = this;
     nextLink = null;
@@ -121,7 +116,7 @@ public abstract class ChainableReverseAbstractInterpreter
   protected JSType getTypeIfRefinable(Node node, FlowScope scope) {
     switch (node.getType()) {
       case Token.NAME:
-        StaticSlot<JSType> nameVar = scope.getSlot(node.getString());
+        StaticTypedSlot<JSType> nameVar = scope.getSlot(node.getString());
         if (nameVar != null) {
           JSType nameVarType = nameVar.getType();
           if (nameVarType == null) {
@@ -136,7 +131,7 @@ public abstract class ChainableReverseAbstractInterpreter
         if (qualifiedName == null) {
           return null;
         }
-        StaticSlot<JSType> propVar = scope.getSlot(qualifiedName);
+        StaticTypedSlot<JSType> propVar = scope.getSlot(qualifiedName);
         JSType propVarType = null;
         if (propVar != null) {
           propVarType = propVar.getType();
@@ -169,7 +164,7 @@ public abstract class ChainableReverseAbstractInterpreter
 
         JSType origType = node.getJSType();
         origType = origType == null ? getNativeType(UNKNOWN_TYPE) : origType;
-        scope.inferQualifiedSlot(node, qualifiedName, origType, type);
+        scope.inferQualifiedSlot(node, qualifiedName, origType, type, false);
         break;
 
       case Token.THIS:

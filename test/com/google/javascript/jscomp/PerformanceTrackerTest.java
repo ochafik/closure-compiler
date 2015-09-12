@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
  *
  * @author dimvar@google.com (Dimitris Vardoulakis)
  */
-public class PerformanceTrackerTest extends TestCase {
+public final class PerformanceTrackerTest extends TestCase {
   private Node emptyScript = new Node(Token.SCRIPT);
 
   public void testStatsCalculation() {
@@ -106,7 +106,6 @@ public class PerformanceTrackerTest extends TestCase {
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     PrintStream outstream = new PrintStream(output);
     tracker.outputTracerReport(outstream);
-    outstream.flush();
     outstream.close();
     Pattern p = Pattern.compile(
         ".*Summary:\npass,runtime,runs,changingRuns,reduction,gzReduction" +

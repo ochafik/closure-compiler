@@ -20,8 +20,11 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.JSDocInfo.Visibility;
+import com.google.javascript.rhino.JSTypeExpression;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
+
+import java.util.Iterator;
 
 /**
  * Prints a JSDocInfo, used for preserving type annotations in ES6 transpilation.
@@ -33,8 +36,11 @@ public final class JSDocInfoPrinter {
     if (info.isConstructor()) {
       sb.append("@constructor ");
     }
-    if (info.isInterface()) {
+    if (info.isInterface() && !info.usesImplicitMatch()) {
       sb.append("@interface ");
+    }
+    if (info.isInterface() && info.usesImplicitMatch()) {
+      sb.append("@record ");
     }
     if (info.makesDicts()) {
       sb.append("@dict ");
@@ -57,6 +63,9 @@ public final class JSDocInfoPrinter {
     if (info.isConstant()) {
       sb.append("@const ");
     }
+    if (info.isExport()) {
+      sb.append("@export ");
+    }
     if (info.isDeprecated()) {
       sb.append("@deprecated ");
       sb.append(info.getDeprecationReason() + " ");
@@ -66,8 +75,16 @@ public final class JSDocInfoPrinter {
       sb.append("@" + info.getVisibility().toString().toLowerCase() + " ");
     }
 
-    for (String suppression : info.getSuppressions()) {
-      sb.append("@suppress {" + suppression + "} ");
+    Iterator<String> suppressions = info.getSuppressions().iterator();
+    if (suppressions.hasNext()) {
+      sb.append("@suppress {");
+      while (suppressions.hasNext()) {
+        sb.append(suppressions.next());
+        if (suppressions.hasNext()) {
+          sb.append(",");
+        }
+      }
+      sb.append("} ");
     }
 
     ImmutableList<String> names = info.getTemplateTypeNames();
@@ -79,9 +96,14 @@ public final class JSDocInfoPrinter {
 
     if (info.getParameterCount() > 0) {
       for (String name : info.getParameterNames()) {
-        sb.append("@param {");
-        appendTypeNode(sb, info.getParameterType(name).getRoot());
-        sb.append("} " + name + " ");
+        sb.append("@param ");
+        if (info.getParameterType(name) != null) {
+          sb.append("{");
+          appendTypeNode(sb, info.getParameterType(name).getRoot());
+          sb.append("} ");
+        }
+        sb.append(name);
+        sb.append(' ');
       }
     }
     if (info.hasReturnType()) {
@@ -102,6 +124,26 @@ public final class JSDocInfoPrinter {
     if (info.hasBaseType()) {
       sb.append("@extends {");
       Node typeNode = info.getBaseType().getRoot();
+      if (typeNode.getType() == Token.BANG) {
+        appendTypeNode(sb, typeNode.getFirstChild());
+      } else {
+        appendTypeNode(sb, typeNode);
+      }
+      sb.append("} ");
+    }
+    for (JSTypeExpression type : info.getExtendedInterfaces()) {
+      sb.append("@extends {");
+      Node typeNode = type.getRoot();
+      if (typeNode.getType() == Token.BANG) {
+        appendTypeNode(sb, typeNode.getFirstChild());
+      } else {
+        appendTypeNode(sb, typeNode);
+      }
+      sb.append("} ");
+    }
+    for (JSTypeExpression type : info.getImplementedInterfaces()) {
+      sb.append("@implements {");
+      Node typeNode = type.getRoot();
       if (typeNode.getType() == Token.BANG) {
         appendTypeNode(sb, typeNode.getFirstChild());
       } else {
@@ -147,88 +189,109 @@ public final class JSDocInfoPrinter {
       appendTypeNode(sb, typeNode.getFirstChild());
       sb.append("=");
     } else if (typeNode.getType() == Token.PIPE) {
+      sb.append("(");
       for (int i = 0; i < typeNode.getChildCount() - 1; i++) {
         appendTypeNode(sb, typeNode.getChildAtIndex(i));
         sb.append("|");
       }
       appendTypeNode(sb, typeNode.getLastChild());
+      sb.append(")");
     } else if (typeNode.getType() == Token.ELLIPSIS) {
       sb.append("...");
       if (typeNode.hasChildren()) {
-        boolean inFunction = typeNode.getParent() != null
-            && typeNode.getParent().getParent() != null
-            && typeNode.getParent().getParent().isFunction();
-        if (inFunction) {
-          sb.append("[");
-        }
         appendTypeNode(sb, typeNode.getFirstChild());
-        if (inFunction) {
-          sb.append("]");
-        }
       }
     } else if (typeNode.getType() == Token.STAR) {
       sb.append("*");
     } else if (typeNode.getType() == Token.QMARK) {
       sb.append("?");
+      if (typeNode.hasChildren()) {
+        appendTypeNode(sb, typeNode.getFirstChild());
+      }
     } else if (typeNode.isFunction()) {
-      sb.append("function(");
-      Node first = typeNode.getFirstChild();
-      if (first.isNew()) {
-        sb.append("new:");
-        appendTypeNode(sb, typeNode.getFirstChild().getFirstChild());
-        sb.append(",");
-      } else if (first.isThis()) {
-        sb.append("this:");
-        appendTypeNode(sb, typeNode.getFirstChild().getFirstChild());
-        sb.append(",");
-      } else if (first.isEmpty()) {
-        sb.append(")");
-        return;
-      } else if (first.isVoid()) {
-        sb.append("):void");
-        return;
-      }
-      Node paramList = typeNode.getFirstChild().isParamList()
-          ? typeNode.getFirstChild()
-          : typeNode.getChildAtIndex(1);
-      for (int i = 0; i < paramList.getChildCount() - 1; i++) {
-        appendTypeNode(sb, paramList.getChildAtIndex(i));
-        sb.append(",");
-      }
-      appendTypeNode(sb, paramList.getLastChild());
-      sb.append(")");
-      Node returnType = typeNode.getLastChild();
-      if (!returnType.isEmpty()) {
-        sb.append(":");
-        appendTypeNode(sb, returnType);
-      }
+      appendFunctionNode(sb, typeNode);
     } else if (typeNode.getType() == Token.LC) {
       sb.append("{");
       Node lb = typeNode.getFirstChild();
       for (int i = 0; i < lb.getChildCount() - 1; i++) {
         Node colon = lb.getChildAtIndex(i);
-        sb.append(colon.getFirstChild().getString() + ":");
-        appendTypeNode(sb, colon.getLastChild());
+        if (colon.hasChildren()) {
+          sb.append(colon.getFirstChild().getString() + ":");
+          appendTypeNode(sb, colon.getLastChild());
+        } else {
+          sb.append(colon.getString());
+        }
         sb.append(",");
       }
       Node lastColon = lb.getLastChild();
-      sb.append(lastColon.getFirstChild().getString() + ":");
-      appendTypeNode(sb, lastColon.getLastChild());
+      if (lastColon.hasChildren()) {
+        sb.append(lastColon.getFirstChild().getString() + ":");
+        appendTypeNode(sb, lastColon.getLastChild());
+      } else {
+        sb.append(lastColon.getString());
+      }
       sb.append("}");
     } else if (typeNode.getType() == Token.VOID) {
       sb.append("void");
     } else {
-      if (typeNode.getString().equals("Array")) {
-        if (typeNode.hasChildren()) {
-          sb.append("Array.<");
-          appendTypeNode(sb, typeNode.getFirstChild().getFirstChild());
-          sb.append(">");
-        } else {
-          sb.append("Array");
+      if (typeNode.hasChildren()) {
+        sb.append(typeNode.getString())
+            .append("<");
+        Node child = typeNode.getFirstChild();
+        appendTypeNode(sb, child.getFirstChild());
+        for (int i = 1; i < child.getChildCount(); i++) {
+          sb.append(",");
+          appendTypeNode(sb, child.getChildAtIndex(i));
         }
+        sb.append(">");
       } else {
         sb.append(typeNode.getString());
       }
+    }
+  }
+
+  private static void appendFunctionNode(StringBuilder sb, Node function) {
+    boolean hasNewOrThis = false;
+    sb.append("function(");
+    Node first = function.getFirstChild();
+    if (first.isNew()) {
+      sb.append("new:");
+      appendTypeNode(sb, first.getFirstChild());
+      hasNewOrThis = true;
+    } else if (first.isThis()) {
+      sb.append("this:");
+      appendTypeNode(sb, first.getFirstChild());
+      hasNewOrThis = true;
+    } else if (first.isEmpty()) {
+      sb.append(")");
+      return;
+    } else if (!first.isParamList()) {
+      sb.append("):");
+      appendTypeNode(sb, first);
+      return;
+    }
+    Node paramList = null;
+    if (first.isParamList()) {
+      paramList = first;
+    } else if (first.getNext().isParamList()) {
+      paramList = first.getNext();
+    }
+    if (paramList != null) {
+      boolean firstParam = true;
+      for (Node param : paramList.children()) {
+        if (!firstParam || hasNewOrThis) {
+          sb.append(",");
+        }
+        appendTypeNode(sb, param);
+        firstParam = false;
+      }
+    }
+    sb.append(")");
+
+    Node returnType = function.getLastChild();
+    if (!returnType.isEmpty()) {
+      sb.append(":");
+      appendTypeNode(sb, returnType);
     }
   }
 }

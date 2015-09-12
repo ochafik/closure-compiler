@@ -18,6 +18,7 @@ package com.google.javascript.jscomp;
 
 import com.google.common.base.Preconditions;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
+import com.google.javascript.jscomp.NodeUtil.ValueType;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
@@ -38,12 +39,12 @@ final class CheckSuspiciousCode extends AbstractPostOrderCallback {
 
   static final DiagnosticType SUSPICIOUS_SEMICOLON = DiagnosticType.warning(
       "JSC_SUSPICIOUS_SEMICOLON",
-      "If this if/for/while really shouldn't have a body, use {}");
+      "If this if/for/while really shouldn''t have a body, use '{}'");
 
   static final DiagnosticType SUSPICIOUS_COMPARISON_WITH_NAN =
       DiagnosticType.warning(
           "JSC_SUSPICIOUS_NAN",
-          "Comparison again NaN is always false. Did you mean isNaN()?");
+          "Comparison against NaN is always false. Did you mean isNaN()?");
 
   static final DiagnosticType SUSPICIOUS_IN_OPERATOR =
       DiagnosticType.warning(
@@ -76,6 +77,7 @@ final class CheckSuspiciousCode extends AbstractPostOrderCallback {
 
       case Token.WHILE:
       case Token.FOR:
+      case Token.FOR_OF:
         reportIfWasEmpty(t, NodeUtil.getLoopCodeBlock(n));
         break;
     }
@@ -130,7 +132,7 @@ final class CheckSuspiciousCode extends AbstractPostOrderCallback {
 
   private static boolean reportIfNonObject(
       NodeTraversal t, Node n, DiagnosticType diagnosticType) {
-    if (NodeUtil.isImmutableResult(n) || n.getType() == Token.NOT) {
+    if (n.isAdd() || NodeUtil.getKnownValueType(n) != ValueType.UNDETERMINED) {
       t.getCompiler().report(
           t.makeError(n.getParent(), diagnosticType));
       return true;

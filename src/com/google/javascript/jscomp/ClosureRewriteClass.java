@@ -18,8 +18,6 @@ package com.google.javascript.jscomp;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.JSDocInfo;
@@ -30,6 +28,7 @@ import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -71,11 +70,26 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
       "JSC_GOOG_CLASS_UNEXPECTED_PARAMS",
       "The class definition has too many arguments.");
 
+  static final DiagnosticType GOOG_CLASS_ES6_COMPUTED_PROP_NAMES_NOT_SUPPORTED =
+      DiagnosticType.error(
+          "JSC_GOOG_CLASS_ES6_COMPUTED_PROP_NAMES_NOT_SUPPORTED",
+          "Computed property names not supported in goog.defineClass.");
+
+  static final DiagnosticType GOOG_CLASS_ES6_SHORTHAND_ASSIGNMENT_NOT_SUPPORTED =
+      DiagnosticType.error(
+          "JSC_GOOG_CLASS_ES6_SHORTHAND_ASSIGNMENT_NOT_SUPPORTED",
+          "Shorthand assignments not supported in goog.defineClass.");
+
+  static final DiagnosticType GOOG_CLASS_ES6_ARROW_FUNCTION_NOT_SUPPORTED =
+      DiagnosticType.error(
+          "JSC_GOOG_CLASS_ES6_ARROW_FUNCTION_NOT_SUPPORTED",
+          "Arrow functions not supported in goog.defineClass. Object literal method"
+          + " definition may be an alternative.");
+
   // Warnings
   static final DiagnosticType GOOG_CLASS_NG_INJECT_ON_CLASS = DiagnosticType.warning(
       "JSC_GOOG_CLASS_NG_INJECT_ON_CLASS",
       "@ngInject should be declared on the constructor, not on the class.");
-
 
   private final AbstractCompiler compiler;
 
@@ -90,15 +104,13 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
 
   @Override
   public void hotSwapScript(Node scriptRoot, Node originalRoot) {
-    NodeTraversal.traverse(compiler, scriptRoot, this);
+    NodeTraversal.traverseEs6(compiler, scriptRoot, this);
   }
 
   @Override
   public void visit(NodeTraversal t, Node n, Node parent) {
-    if (n.isCall() && isGoogDefineClass(n)) {
-      if (!validateUsage(n)) {
-        compiler.report(JSError.make(n, GOOG_CLASS_TARGET_INVALID));
-      }
+    if (n.isCall() && isGoogDefineClass(n) && !validateUsage(n)) {
+      compiler.report(JSError.make(n, GOOG_CLASS_TARGET_INVALID));
     }
     maybeRewriteClassDefinition(n);
   }
@@ -135,7 +147,7 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
   }
 
   private void maybeRewriteClassDefinition(Node n) {
-    if (n.isVar()) {
+    if (NodeUtil.isNameDeclaration(n)) {
       Node target = n.getFirstChild();
       Node value = target.getFirstChild();
       maybeRewriteClassDefinition(n, target, value);
@@ -224,11 +236,8 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
     }
 
     Node description = NodeUtil.getArgumentForCallOrNew(callNode, 1);
-    if (description == null
-        || !description.isObjectLit()
-        || !validateObjLit(description)) {
-      // report bad class definition
-      compiler.report(JSError.make(callNode, GOOG_CLASS_DESCRIPTOR_NOT_VALID));
+    if (!validateObjLit(description, callNode)) {
+      // Errors will be reported in the validate method. Keeping here clean
       return null;
     }
 
@@ -263,7 +272,11 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
     Node statics = null;
     Node staticsProp = extractProperty(description, "statics");
     if (staticsProp != null) {
-      if (staticsProp.isObjectLit() && validateObjLit(staticsProp)) {
+      if (staticsProp.isObjectLit()){
+        if (!validateObjLit(staticsProp, staticsProp.getParent())) {
+          // Errors will be reported in the validate method. Keeping here clean
+          return null;
+        }
         statics = staticsProp;
       } else if (staticsProp.isFunction()) {
         classModifier = staticsProp;
@@ -303,14 +316,60 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
     return node;
   }
 
-  // Only unquoted plain properties are currently supported.
-  private static boolean validateObjLit(Node objlit) {
+  /**
+   * @param objlit              the object literal being checked.
+   * @param parent              the parent of the object literal node
+   * @return false if the node is not an object literal, or if it contains any
+   *         property that is neither unquoted plain property nor member
+   *         function definition (ES6 feature)
+   */
+  private boolean validateObjLit(Node objlit, Node parent) {
+    if (objlit == null || !objlit.isObjectLit()) {
+      reportErrorOnContext(parent);
+      return false;
+    }
+
     for (Node key : objlit.children()) {
+      if (key.isMemberFunctionDef()) {
+        continue;
+      }
+      if (key.isComputedProp()) {
+        // report using computed property name
+        compiler.report(JSError.make(objlit,
+            GOOG_CLASS_ES6_COMPUTED_PROP_NAMES_NOT_SUPPORTED));
+        return false;
+      }
+      if (key.isStringKey() && !key.hasChildren()) {
+        // report using shorthand assignment
+        compiler.report(JSError.make(objlit,
+            GOOG_CLASS_ES6_SHORTHAND_ASSIGNMENT_NOT_SUPPORTED));
+        return false;
+      }
+      if (key.isStringKey()
+          && key.hasChildren()
+          && key.getFirstChild().isArrowFunction()){
+        // report using arrow function
+        compiler.report(JSError.make(objlit,
+            GOOG_CLASS_ES6_ARROW_FUNCTION_NOT_SUPPORTED));
+        return false;
+      }
       if (!key.isStringKey() || key.isQuotedString()) {
+        reportErrorOnContext(parent);
         return false;
       }
     }
     return true;
+  }
+
+  private void reportErrorOnContext(Node parent){
+    if (parent.isStringKey()){
+      compiler.report(JSError.make(parent, GOOG_CLASS_STATICS_NOT_VALID));
+    } else {
+      // Report error in the context that the objlit is an
+      // argument of goog.defineClass call.
+      Preconditions.checkState(parent.isCall());
+      compiler.report(JSError.make(parent, GOOG_CLASS_DESCRIPTOR_NOT_VALID));
+    }
   }
 
   /**
@@ -319,7 +378,7 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
   private static Node extractProperty(Node objlit, String keyName) {
     for (Node keyNode : objlit.children()) {
       if (keyNode.getString().equals(keyName)) {
-        return keyNode.isStringKey() ? keyNode.getFirstChild() : null;
+        return keyNode.getFirstChild();
       }
     }
     return null;
@@ -327,7 +386,7 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
 
   private static List<MemberDefinition> objectLitToList(
       Node objlit) {
-    List<MemberDefinition> result = Lists.newArrayList();
+    List<MemberDefinition> result = new ArrayList<>();
     for (Node keyNode : objlit.children()) {
       result.add(
           new MemberDefinition(
@@ -345,13 +404,13 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
 
     // remove the original jsdoc info if it was attached to the value.
     cls.constructor.value.setJSDocInfo(null);
-    if (exprRoot.isVar()) {
+    if (NodeUtil.isNameDeclaration(exprRoot)) {
       // example: var ctr = function(){}
-      Node var = IR.var(cls.name.cloneTree(), cls.constructor.value)
+      Node decl = IR.declaration(cls.name.cloneTree(), cls.constructor.value, exprRoot.getType())
           .srcref(exprRoot);
-      JSDocInfo mergedClassInfo = mergeJsDocFor(cls, var);
-      var.setJSDocInfo(mergedClassInfo);
-      block.addChildToBack(var);
+      JSDocInfo mergedClassInfo = mergeJsDocFor(cls, decl);
+      decl.setJSDocInfo(mergedClassInfo);
+      block.addChildToBack(decl);
     } else {
       // example: ns.ctr = function(){}
       Node assign = IR.assign(cls.name.cloneTree(), cls.constructor.value)
@@ -422,8 +481,9 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
       Node argList = cls.classModifier.getFirstChild().getNext();
       Node arg = argList.getFirstChild();
       final String argName = arg.getString();
-      NodeTraversal.traverse(compiler, cls.classModifier.getLastChild(),
+      NodeTraversal.traverseEs6(compiler, cls.classModifier.getLastChild(),
           new AbstractPostOrderCallback() {
+            @Override
             public void visit(NodeTraversal t, Node n, Node parent) {
               if (n.isName() && n.getString().equals(argName)) {
                 parent.replaceChild(n, cls.name.cloneTree());
@@ -476,11 +536,11 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
     // avoid null checks
     JSDocInfo classInfo = (cls.classInfo != null)
         ? cls.classInfo
-        : new JSDocInfo(true);
+        : new JSDocInfoBuilder(true).build(true);
 
     JSDocInfo ctorInfo = (cls.constructor.info != null)
         ? cls.constructor.info
-        : new JSDocInfo(true);
+        : new JSDocInfoBuilder(true).build(true);
 
     Node superNode = cls.superClass;
 
@@ -498,7 +558,7 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
     }
 
     // merge suppressions
-    Set<String> suppressions = Sets.newHashSet();
+    Set<String> suppressions = new HashSet<>();
     suppressions.addAll(classInfo.getSuppressions());
     suppressions.addAll(ctorInfo.getSuppressions());
     if (!suppressions.isEmpty()) {
@@ -567,8 +627,11 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
         mergedInfo.recordStruct();
       }
 
-      // a "super" implies @extends
-      if (superNode != null) {
+
+      if (classInfo.getBaseType() != null) {
+        mergedInfo.recordBaseType(classInfo.getBaseType());
+      } else if (superNode != null) {
+        // a "super" implies @extends, build a default.
         JSTypeExpression baseType = new JSTypeExpression(
             new Node(Token.BANG,
               IR.string(superNode.getQualifiedName())),
@@ -590,6 +653,6 @@ class ClosureRewriteClass extends AbstractPostOrderCallback
     for (String typeName : templateNames) {
       mergedInfo.recordTemplateTypeName(typeName);
     }
-    return mergedInfo.build(associatedNode);
+    return mergedInfo.build();
   }
 }

@@ -16,13 +16,14 @@
 
 package com.google.javascript.jscomp;
 
+import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 
 /**
  * Tests for {@code CheckEventfulObjectDisposal.java}.
  *
  */
 
-public class CheckEventfulObjectDisposalTest extends CompilerTestCase {
+public final class CheckEventfulObjectDisposalTest extends CompilerTestCase {
 
   private CheckEventfulObjectDisposal.DisposalCheckingPolicy policy =
       CheckEventfulObjectDisposal.DisposalCheckingPolicy.ON;
@@ -56,7 +57,7 @@ public class CheckEventfulObjectDisposalTest extends CompilerTestCase {
   protected void setUp() throws Exception {
     super.setUp();
     enableTypeCheck(CheckLevel.WARNING);
-    enableEcmaScript5(true);
+    setAcceptedLanguage(LanguageMode.ECMASCRIPT5);
   }
 
   @Override
@@ -77,13 +78,13 @@ public class CheckEventfulObjectDisposalTest extends CompilerTestCase {
   }
 
   public void testNotFreed1() {
-    String js = CLOSURE_DEFS
-        + "/** @extends {goog.Disposable}\n * @constructor */"
-        + "var test = function() { this.eh = new goog.events.EventHandler(); };"
-        + "goog.inherits(test, goog.Disposable);"
-        + "var testObj = new test();";
-    testSame(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_NOT_DISPOSED,
-        true);
+    String js =
+        CLOSURE_DEFS
+            + "/** @extends {goog.Disposable}\n * @constructor */"
+            + "var test = function() { this.eh = new goog.events.EventHandler(); };"
+            + "goog.inherits(test, goog.Disposable);"
+            + "var testObj = new test();";
+    testError(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_NOT_DISPOSED);
   }
 
   public void testLocal() {
@@ -98,14 +99,14 @@ public class CheckEventfulObjectDisposalTest extends CompilerTestCase {
 
   public void testLocalAggressive() {
     policy = CheckEventfulObjectDisposal.DisposalCheckingPolicy.AGGRESSIVE;
-    String js = CLOSURE_DEFS
-        + "/** @extends {goog.Disposable}\n * @constructor */"
-        + "var test = function() { var eh = new goog.events.EventHandler();\n"
-        + "};\n"
-        + "goog.inherits(test, goog.Disposable);"
-        + "var testObj = new test();";
-    testSame(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_PURELY_LOCAL,
-        true);
+    String js =
+        CLOSURE_DEFS
+            + "/** @extends {goog.Disposable}\n * @constructor */"
+            + "var test = function() { var eh = new goog.events.EventHandler();\n"
+            + "};\n"
+            + "goog.inherits(test, goog.Disposable);"
+            + "var testObj = new test();";
+    testError(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_PURELY_LOCAL);
   }
 
   public void testFreedLocal1() {
@@ -153,14 +154,14 @@ public class CheckEventfulObjectDisposalTest extends CompilerTestCase {
 
   public void testFreedLocal2Aggressive() {
     policy = CheckEventfulObjectDisposal.DisposalCheckingPolicy.AGGRESSIVE;
-    String js = CLOSURE_DEFS
-        + "/** @extends {goog.Disposable}\n * @constructor */"
-        + "var test = function() { var eh = new goog.events.EventHandler();"
-        + "this.registerDisposable(eh); };"
-        + "goog.inherits(test, goog.Disposable);"
-        + "var testObj = new test();";
-    testSame(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_PURELY_LOCAL,
-        true);
+    String js =
+        CLOSURE_DEFS
+            + "/** @extends {goog.Disposable}\n * @constructor */"
+            + "var test = function() { var eh = new goog.events.EventHandler();"
+            + "this.registerDisposable(eh); };"
+            + "goog.inherits(test, goog.Disposable);"
+            + "var testObj = new test();";
+    testError(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_PURELY_LOCAL);
   }
 
   public void testLocalLive1() {
@@ -225,16 +226,16 @@ public class CheckEventfulObjectDisposalTest extends CompilerTestCase {
   }
 
   public void testNotAllFreedGoogDispose() {
-    String js = CLOSURE_DEFS
-        + "/** @extends {goog.Disposable}\n * @constructor */"
-        + "var test = function() {"
-        + "this.eh1 = new goog.events.EventHandler();"
-        + "this.eh2 = new goog.events.EventHandler();"
-        + "goog.dispose(this.eh1, this.eh2); };"
-        + "goog.inherits(test, goog.Disposable);"
-        + "var testObj = new test();";
-    testSame(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_NOT_DISPOSED,
-        true);
+    String js =
+        CLOSURE_DEFS
+            + "/** @extends {goog.Disposable}\n * @constructor */"
+            + "var test = function() {"
+            + "this.eh1 = new goog.events.EventHandler();"
+            + "this.eh2 = new goog.events.EventHandler();"
+            + "goog.dispose(this.eh1, this.eh2); };"
+            + "goog.inherits(test, goog.Disposable);"
+            + "var testObj = new test();";
+    testError(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_NOT_DISPOSED);
   }
 
   public void testFreedGoogDisposeAll() {
@@ -270,20 +271,20 @@ public class CheckEventfulObjectDisposalTest extends CompilerTestCase {
   }
 
   public void testPrivateInheritance() {
-    String js = CLOSURE_DEFS
-        + "/** @extends {goog.Disposable}\n * @constructor */"
-        + "var test = function() { "
-        + "/** @private */ this.eh = new goog.events.EventHandler();"
-        + "this.eh.removeAll(); };"
-        + "goog.inherits(test, goog.Disposable);"
-        + "/** @extends {test}\n * @constructor */"
-        + "var subclass = function() {"
-        + "/** @private */ this.eh = new goog.events.EventHandler();"
-        + "this.eh.dispose();"
-        + "};"
-        + "var testObj = new test();";
-    testSame(js, CheckEventfulObjectDisposal.OVERWRITE_PRIVATE_EVENTFUL_OBJECT,
-        true);
+    String js =
+        CLOSURE_DEFS
+            + "/** @extends {goog.Disposable}\n * @constructor */"
+            + "var test = function() { "
+            + "/** @private */ this.eh = new goog.events.EventHandler();"
+            + "this.eh.removeAll(); };"
+            + "goog.inherits(test, goog.Disposable);"
+            + "/** @extends {test}\n * @constructor */"
+            + "var subclass = function() {"
+            + "/** @private */ this.eh = new goog.events.EventHandler();"
+            + "this.eh.dispose();"
+            + "};"
+            + "var testObj = new test();";
+    testError(js, CheckEventfulObjectDisposal.OVERWRITE_PRIVATE_EVENTFUL_OBJECT);
   }
 
   public void testCustomDispose1() {
@@ -315,15 +316,15 @@ public class CheckEventfulObjectDisposalTest extends CompilerTestCase {
 
   public void testCustomDispose3() {
     policy = CheckEventfulObjectDisposal.DisposalCheckingPolicy.AGGRESSIVE;
-    String js = CLOSURE_DEFS
-        + "/** @param todispose\n @param ctx\n @disposes todispose\n */"
-        + "customDispose = function(todispose, ctx) {"
-        + " ctx.registerDisposable(todispose);"
-        + " return todispose;"
-        + "};"
-        + "var x = new goog.events.EventHandler();"
-        + "customDispose(OBJ, x);";
-    testSame(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_PURELY_LOCAL,
-        true);
+    String js =
+        CLOSURE_DEFS
+            + "/** @param todispose\n @param ctx\n @disposes todispose\n */"
+            + "customDispose = function(todispose, ctx) {"
+            + " ctx.registerDisposable(todispose);"
+            + " return todispose;"
+            + "};"
+            + "var x = new goog.events.EventHandler();"
+            + "customDispose(OBJ, x);";
+    testError(js, CheckEventfulObjectDisposal.EVENTFUL_OBJECT_PURELY_LOCAL);
   }
 }

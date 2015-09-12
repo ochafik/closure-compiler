@@ -16,16 +16,17 @@
 
 package com.google.javascript.jscomp;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
+import com.google.common.collect.ImmutableList;
 import com.google.javascript.jscomp.AbstractCompiler.LifeCycleStage;
 import com.google.javascript.jscomp.FunctionInjector.CanInlineResult;
 import com.google.javascript.jscomp.FunctionInjector.InliningMode;
 import com.google.javascript.jscomp.FunctionInjector.Reference;
 import com.google.javascript.jscomp.NodeTraversal.Callback;
 import com.google.javascript.rhino.Node;
+
 import junit.framework.TestCase;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -34,7 +35,7 @@ import java.util.Set;
  * @author johnlenz@google.com (John Lenz)
  */
 
-public class FunctionInjectorTest extends TestCase {
+public final class FunctionInjectorTest extends TestCase {
   static final InliningMode INLINE_DIRECT = InliningMode.DIRECT;
   static final InliningMode INLINE_BLOCK = InliningMode.BLOCK;
   private boolean assumeStrictThis = false;
@@ -461,6 +462,15 @@ public class FunctionInjectorTest extends TestCase {
     // Call with inner function statement.
     helperCanInlineReferenceToFunction(CanInlineResult.YES,
         "function foo(){function x() {var a; return true;} return x}; foo();",
+        "foo", INLINE_BLOCK);
+  }
+
+  public void testCanInlineReferenceToFunction52() {
+    // Don't inline functions with var declarations into a scope with inner functions
+    helperCanInlineReferenceToFunction(
+        CanInlineResult.NO,
+        "function foo() { var a = 3; return a; }"
+        + "function bar() { function baz() {} if (true) { foo(); } }",
         "foo", INLINE_BLOCK);
   }
 
@@ -1408,7 +1418,7 @@ public class FunctionInjectorTest extends TestCase {
 
     compiler.resetUniqueNameId();
     TestCallback test = new TestCallback(fnName, tester);
-    NodeTraversal.traverse(compiler, tree, test);
+    NodeTraversal.traverseEs6(compiler, tree, test);
   }
 
   public void helperInlineReferenceToFunction(
@@ -1440,12 +1450,12 @@ public class FunctionInjectorTest extends TestCase {
         assumeStrictThis,
         assumeMinimumCapture);
 
-    List<SourceFile> externsInputs = Lists.newArrayList(
+    List<SourceFile> externsInputs = ImmutableList.of(
         SourceFile.fromCode("externs", ""));
 
     CompilerOptions options = new CompilerOptions();
     options.setCodingConvention(new GoogleCodingConvention());
-    compiler.init(externsInputs, Lists.newArrayList(
+    compiler.init(externsInputs, ImmutableList.of(
         SourceFile.fromCode("code", code)), options);
     Node parseRoot = compiler.parseInputs();
     Node externsRoot = parseRoot.getFirstChild();
@@ -1484,7 +1494,7 @@ public class FunctionInjectorTest extends TestCase {
           assertSame("canInlineReferenceToFunction " + "should be CAN_INLINE_AFTER_DECOMPOSITION",
               canInline, CanInlineResult.AFTER_PREPARATION);
 
-          Set<String> knownConstants = Sets.newHashSet();
+          Set<String> knownConstants = new HashSet<>();
           injector.setKnownConstants(knownConstants);
           injector.maybePrepareCall(ref);
 
@@ -1505,7 +1515,7 @@ public class FunctionInjectorTest extends TestCase {
 
     compiler.resetUniqueNameId();
     TestCallback test = new TestCallback(fnName, tester);
-    NodeTraversal.traverse(compiler, tree, test);
+    NodeTraversal.traverseEs6(compiler, tree, test);
   }
 
   interface Method {
@@ -1585,8 +1595,8 @@ public class FunctionInjectorTest extends TestCase {
     Node n = compiler.parseTestCode(js);
     String message = "Unexpected errors: ";
     JSError[] errs = compiler.getErrors();
-    for (int i = 0; i < errs.length; i++){
-      message += "\n" + errs[i];
+    for (JSError element : errs) {
+      message += "\n" + element;
     }
     assertEquals(message, 0, compiler.getErrorCount());
     return n;

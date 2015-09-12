@@ -16,7 +16,9 @@
 
 package com.google.javascript.jscomp;
 
-import com.google.common.collect.Lists;
+import static com.google.common.truth.Truth.assertThat;
+
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Ordering;
 import com.google.javascript.jscomp.ControlFlowGraph.Branch;
 import com.google.javascript.jscomp.graph.DiGraph.DiGraphEdge;
@@ -26,6 +28,7 @@ import com.google.javascript.rhino.Token;
 
 import junit.framework.TestCase;
 
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -34,7 +37,7 @@ import java.util.List;
  * Tests {@link ControlFlowAnalysis}.
  *
  */
-public class ControlFlowAnalysisTest extends TestCase {
+public final class ControlFlowAnalysisTest extends TestCase {
 
   /**
    * Given an input in JavaScript, test if the control flow analysis
@@ -53,7 +56,7 @@ public class ControlFlowAnalysisTest extends TestCase {
    */
   private static List<DiGraphEdge<Node, Branch>> getAllEdges(
       ControlFlowGraph<Node> cfg) {
-    List<DiGraphEdge<Node, Branch>> edges = Lists.newArrayList();
+    List<DiGraphEdge<Node, Branch>> edges = new ArrayList<>();
     for (DiGraphNode<Node, Branch> n : cfg.getDirectedGraphNodes()) {
       edges.addAll(cfg.getOutEdges(n.getValue()));
     }
@@ -137,7 +140,7 @@ public class ControlFlowAnalysisTest extends TestCase {
    */
   private static void assertNoEdge(ControlFlowGraph<Node> cfg, int startToken,
       int endToken) {
-    assertEquals(0, getAllEdges(cfg, startToken, endToken).size());
+    assertThat(getAllEdges(cfg, startToken, endToken)).isEmpty();
   }
 
   /**
@@ -1292,7 +1295,7 @@ public class ControlFlowAnalysisTest extends TestCase {
   public void testForLoopOrder() {
     assertNodeOrder(
         createCfg("for (var i = 0; i < 5; i++) { var x = 3; } if (true) {}"),
-        Lists.newArrayList(
+        ImmutableList.of(
             Token.SCRIPT, Token.VAR, Token.FOR, Token.BLOCK, Token.VAR,
             Token.INC /* i++ */,
             Token.IF, Token.BLOCK));
@@ -1303,7 +1306,7 @@ public class ControlFlowAnalysisTest extends TestCase {
         createCfg("var i = 0; var y = {}; " +
             "label: for (var x in y) { " +
             "    if (x) { break label; } else { i++ } x(); }"),
-        Lists.newArrayList(
+        ImmutableList.of(
             Token.SCRIPT, Token.VAR, Token.VAR, Token.NAME,
             Token.FOR, Token.BLOCK,
             Token.IF, Token.BLOCK, Token.BREAK,
@@ -1315,7 +1318,7 @@ public class ControlFlowAnalysisTest extends TestCase {
         createCfg("function f() { while (x) { x++; } } var x = 3;");
     assertNodeOrder(
         cfg,
-        Lists.newArrayList(
+        ImmutableList.of(
             Token.SCRIPT, Token.VAR,
 
             Token.FUNCTION, Token.BLOCK,
@@ -1325,7 +1328,7 @@ public class ControlFlowAnalysisTest extends TestCase {
   public void testDoWhileOrder() {
     assertNodeOrder(
         createCfg("do { var x = 3; } while (true); void x;"),
-        Lists.newArrayList(
+        ImmutableList.of(
             Token.SCRIPT, Token.BLOCK, Token.VAR, Token.DO, Token.EXPR_RESULT));
   }
 

@@ -16,7 +16,6 @@
 
 package com.google.javascript.jscomp;
 
-import com.google.common.collect.Lists;
 import com.google.javascript.jscomp.NodeTraversal.AbstractShallowCallback;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.Node;
@@ -137,7 +136,7 @@ class ExtractPrototypeMemberDeclarations implements CompilerPass {
   @Override
   public void process(Node externs, Node root) {
     GatherExtractionInfo extractionInfo = new GatherExtractionInfo();
-    NodeTraversal.traverse(compiler, root, extractionInfo);
+    NodeTraversal.traverseEs6(compiler, root, extractionInfo);
     if (extractionInfo.shouldExtract()) {
       doExtraction(extractionInfo);
       compiler.reportCodeChange();
@@ -155,7 +154,7 @@ class ExtractPrototypeMemberDeclarations implements CompilerPass {
       Node injectionPoint = compiler.getNodeForCodeInsertion(null);
 
       Node var = NodeUtil.newVarNode(prototypeAlias, null)
-          .copyInformationFromForTree(injectionPoint);
+          .useSourceInfoIfMissingFromForTree(injectionPoint);
 
       injectionPoint.addChildrenToFront(var);
     }
@@ -181,7 +180,7 @@ class ExtractPrototypeMemberDeclarations implements CompilerPass {
               NodeUtil.newQName(
                   compiler, className + ".prototype",
                   instance.parent, className + ".prototype")))
-          .copyInformationFromForTree(first.node);
+          .useSourceInfoIfMissingFromForTree(first.node);
 
       instance.parent.addChildBefore(stmt, first.node);
     } else if (pattern == Pattern.USE_IIFE){
@@ -198,7 +197,7 @@ class ExtractPrototypeMemberDeclarations implements CompilerPass {
       call.putIntProp(Node.FREE_CALL, 1);
 
       Node stmt = new Node(first.node.getType(), call);
-      stmt.copyInformationFromForTree(first.node);
+      stmt.useSourceInfoIfMissingFromForTree(first.node);
       instance.parent.addChildBefore(stmt, first.node);
       for (PrototypeMemberDeclaration declar : instance.declarations) {
         block.addChildToBack(declar.node.detachFromParent());
@@ -249,7 +248,7 @@ class ExtractPrototypeMemberDeclarations implements CompilerPass {
    */
   private class GatherExtractionInfo extends AbstractShallowCallback {
 
-    private List<ExtractionInstance> instances = Lists.newLinkedList();
+    private List<ExtractionInstance> instances = new LinkedList<>();
     private int totalDelta = pattern.globalOverhead;
 
     @Override
@@ -291,7 +290,7 @@ class ExtractPrototypeMemberDeclarations implements CompilerPass {
   }
 
   private class ExtractionInstance {
-    LinkedList<PrototypeMemberDeclaration> declarations = Lists.newLinkedList();
+    LinkedList<PrototypeMemberDeclaration> declarations = new LinkedList<>();
     private int delta = 0;
     private final Node parent;
 

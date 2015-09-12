@@ -16,6 +16,9 @@
 
 package com.google.javascript.jscomp;
 
+import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.fail;
+
 import com.google.javascript.jscomp.AbstractCompiler.LifeCycleStage;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
@@ -23,7 +26,7 @@ import com.google.javascript.rhino.Token;
 /**
  * @author nicksantos@google.com (Nick Santos)
  */
-public class SanityCheckTest extends CompilerTestCase {
+public final class SanityCheckTest extends CompilerTestCase {
 
   private CompilerPass otherPass = null;
 
@@ -43,7 +46,7 @@ public class SanityCheckTest extends CompilerTestCase {
     return new CompilerPass() {
       @Override public void process(Node externs, Node root) {
         otherPass.process(externs, root);
-        (new SanityCheck(compiler, false)).process(externs, root);
+        (new SanityCheck(compiler)).process(externs, root);
       }
     };
   }
@@ -57,14 +60,12 @@ public class SanityCheckTest extends CompilerTestCase {
       }
     };
 
-    boolean exceptionCaught = false;
     try {
       test("var x = 3;", "var x=3;0;0");
+      fail("Expected IllegalStateException");
     } catch (IllegalStateException e) {
-      assertTrue(e.getMessage().contains("Expected BLOCK but was EMPTY"));
-      exceptionCaught = true;
+      assertThat(e.getMessage()).contains("Expected BLOCK but was EMPTY");
     }
-    assertTrue(exceptionCaught);
   }
 
   public void testUnnormalized() throws Exception {
@@ -74,15 +75,12 @@ public class SanityCheckTest extends CompilerTestCase {
       }
     };
 
-    boolean exceptionCaught = false;
     try {
       test("while(1){}", "while(1){}");
+      fail("Expected RuntimeException");
     } catch (RuntimeException e) {
-      assertTrue(e.getMessage().contains(
-          "Normalize constraints violated:\nWHILE node"));
-      exceptionCaught = true;
+      assertThat(e.getMessage()).contains("Normalize constraints violated:\nWHILE node");
     }
-    assertTrue(exceptionCaught);
   }
 
   public void testConstantAnnotationMismatch() throws Exception {
@@ -96,14 +94,11 @@ public class SanityCheckTest extends CompilerTestCase {
       }
     };
 
-    boolean exceptionCaught = false;
     try {
       test("var x;", "var x; x;");
+      fail("Expected RuntimeException");
     } catch (RuntimeException e) {
-      assertTrue(e.getMessage().contains(
-          "The name x is not consistently annotated as constant."));
-      exceptionCaught = true;
+      assertThat(e.getMessage()).contains("The name x is not consistently annotated as constant.");
     }
-    assertTrue(exceptionCaught);
   }
 }

@@ -17,12 +17,12 @@
 package com.google.javascript.jscomp;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.GlobalNamespace.Name;
 import com.google.javascript.jscomp.GlobalNamespace.Ref;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.Node;
 
+import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -37,8 +37,8 @@ class CheckGlobalNames implements CompilerPass {
   private final CheckLevel level;
 
   private GlobalNamespace namespace = null;
-  private final Set<String> objectPrototypeProps = Sets.newHashSet();
-  private final Set<String> functionPrototypeProps = Sets.newHashSet();
+  private final Set<String> objectPrototypeProps = new HashSet<>();
+  private final Set<String> functionPrototypeProps = new HashSet<>();
 
   // Warnings
   static final DiagnosticType UNDEFINED_NAME_WARNING = DiagnosticType.warning(
@@ -229,7 +229,7 @@ class CheckGlobalNames implements CompilerPass {
   }
 
   /**
-   * Checks whether the given name is a property, and whether that property
+   * The input name is a property. Check whether this property
    * must be initialized with its full qualified name.
    */
   private boolean propertyMustBeInitializedByFullName(Name name) {
@@ -275,16 +275,12 @@ class CheckGlobalNames implements CompilerPass {
       return false;
     }
 
-    if (name.parent.type == Name.Type.OBJECTLIT) {
+    if (name.parent.type == Name.Type.OBJECTLIT
+        || name.parent.type == Name.Type.CLASS) {
       return true;
     }
 
-    if (name.parent.type == Name.Type.FUNCTION &&
-        name.parent.isDeclaredType() &&
-        !functionPrototypeProps.contains(name.getBaseName())) {
-      return true;
-    }
-
-    return false;
+    return name.parent.type == Name.Type.FUNCTION && name.parent.isDeclaredType()
+        && !functionPrototypeProps.contains(name.getBaseName());
   }
 }

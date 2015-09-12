@@ -23,7 +23,7 @@ import javax.annotation.Nullable;
  * Compile error description
  *
  */
-public class JSError {
+public final class JSError {
   /** A type of the error */
   private final DiagnosticType type;
 
@@ -34,7 +34,7 @@ public class JSError {
   public final String sourceName;
 
   /** Node where the warning occurred. */
-  final Node node;
+  public final Node node;
 
   /** Line number of the source */
   public final int lineNumber;

@@ -28,8 +28,7 @@ import static com.google.javascript.rhino.jstype.JSTypeNative.UNKNOWN_TYPE;
 import static com.google.javascript.rhino.jstype.JSTypeNative.VOID_TYPE;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import com.google.javascript.jscomp.Scope.Var;
+import com.google.javascript.jscomp.parsing.parser.util.format.SimpleFormat;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.jstype.FunctionType;
@@ -37,12 +36,13 @@ import com.google.javascript.rhino.jstype.JSType;
 import com.google.javascript.rhino.jstype.JSTypeNative;
 import com.google.javascript.rhino.jstype.JSTypeRegistry;
 import com.google.javascript.rhino.jstype.ObjectType;
-import com.google.javascript.rhino.jstype.StaticSlot;
+import com.google.javascript.rhino.jstype.StaticTypedSlot;
 import com.google.javascript.rhino.jstype.TemplateTypeMap;
 import com.google.javascript.rhino.jstype.TemplateTypeMapReplacer;
 import com.google.javascript.rhino.jstype.UnknownType;
 
 import java.text.MessageFormat;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -64,14 +64,16 @@ class TypeValidator {
   private final AbstractCompiler compiler;
   private final JSTypeRegistry typeRegistry;
   private final JSType allValueTypes;
-  private boolean shouldReport = true;
   private final JSType nullOrUndefined;
   private final boolean reportUnnecessaryCasts;
 
   // TODO(nicksantos): Provide accessors to better filter the list of type
   // mismatches. For example, if we pass (Cake|null) where only Cake is
   // allowed, that doesn't mean we should invalidate all Cakes.
-  private final List<TypeMismatch> mismatches = Lists.newArrayList();
+  private final List<TypeMismatch> mismatches = new ArrayList<>();
+  // the detection logic of this one is similar to this.mismatches
+  private final List<TypeMismatch> implicitStructuralInterfaceUses =
+      new ArrayList<>();
 
   // User warnings
   private static final String FOUND_REQUIRED =
@@ -163,7 +165,7 @@ class TypeValidator {
   /**
    * Utility function for getting a function type from a var.
    */
-  static FunctionType getFunctionType(@Nullable Var v) {
+  static FunctionType getFunctionType(@Nullable TypedVar v) {
     JSType t = v == null ? null : v.getType();
     ObjectType o = t == null ? null : t.dereference();
     return JSType.toMaybeFunctionType(o);
@@ -173,7 +175,7 @@ class TypeValidator {
    * Utility function for getting an instance type from a var pointing
    * to the constructor.
    */
-  static ObjectType getInstanceOfCtor(@Nullable Var v) {
+  static ObjectType getInstanceOfCtor(@Nullable TypedVar v) {
     FunctionType ctor = getFunctionType(v);
     if (ctor != null && ctor.isConstructor()) {
       return ctor.getInstanceType();
@@ -186,13 +188,23 @@ class TypeValidator {
    *
    * For each violation, one element is the expected type and the other is
    * the type that is actually found. Order is not significant.
+   *
+   * NOTE(dimvar): Even though TypeMismatch is a pair, the passes that call this
+   * method never use it as a pair; they just add both its elements to a set
+   * of invalidating types. Consider just maintaining a set of types here
+   * instead of a set of type pairs.
    */
   Iterable<TypeMismatch> getMismatches() {
     return mismatches;
   }
 
-  void setShouldReport(boolean report) {
-    this.shouldReport = report;
+  /**
+   * all uses of implicitly implemented structural interfaces,
+   * captured during type validation and type checking
+   * (uses of explicitly @implemented structural interfaces are excluded)
+   */
+  public Iterable<TypeMismatch> getImplicitStructuralInterfaceUses() {
+    return implicitStructuralInterfaceUses;
   }
 
   // All non-private methods should have the form:
@@ -293,9 +305,9 @@ class TypeValidator {
    */
   boolean expectNotNullOrUndefined(
       NodeTraversal t, Node n, JSType type, String msg, JSType expectedType) {
-    if (!type.isNoType() && !type.isUnknownType() &&
-        type.isSubtype(nullOrUndefined) &&
-        !containsForwardDeclaredUnresolvedName(type)) {
+    if (!type.isNoType() && !type.isUnknownType()
+        && type.isSubtype(nullOrUndefined)
+        && !containsForwardDeclaredUnresolvedName(type)) {
 
       // There's one edge case right now that we don't handle well, and
       // that we don't want to warn about.
@@ -342,10 +354,15 @@ class TypeValidator {
     // in the code base have adapted to the change in the compiler.
     if (!switchType.canTestForShallowEqualityWith(caseType) &&
         (caseType.autoboxesTo() == null ||
-            !caseType.autoboxesTo().isSubtype(switchType))) {
+        !caseType.autoboxesTo().isSubtype(switchType))) {
       mismatch(t, n.getFirstChild(),
           "case expression doesn't match switch",
           caseType, switchType);
+    } else if (!switchType.canTestForShallowEqualityWith(caseType)
+        && (caseType.autoboxesTo() == null
+        || !caseType.autoboxesTo()
+        .isSubtypeWithoutStructuralTyping(switchType))) {
+      recordStructuralInterfaceUses(caseType, switchType);
     }
   }
 
@@ -371,7 +388,13 @@ class TypeValidator {
       expectStringOrNumber(t, indexNode, indexType, "property access");
     } else {
       ObjectType dereferenced = objType.dereference();
-      if (dereferenced != null && dereferenced
+      if (dereferenced != null && typeRegistry.isInstanceOfIObject(objType)) {
+        // make sure that the indexType is consistent with the
+        // type declared in <KEY1> from IObject<KEY1, VALUE1>
+        expectCanAssignTo(t, indexNode, indexType, dereferenced
+            .getTemplateTypeMap().getTemplateType(typeRegistry.getIObjectKeyKey()),
+            "restricted index type");
+      } else if (dereferenced != null && dereferenced
           .getTemplateTypeMap()
           .hasTemplateKey(typeRegistry.getObjectIndexKey())) {
         expectCanAssignTo(t, indexNode, indexType, dereferenced
@@ -411,17 +434,20 @@ class TypeValidator {
       JSType ownerType = getJSType(owner);
       if (ownerType.isFunctionPrototypeType()) {
         FunctionType ownerFn = ownerType.toObjectType().getOwnerFunction();
-        if (ownerFn.isInterface() &&
-            rightType.isFunctionType() && leftType.isFunctionType()) {
+        if (ownerFn.isInterface()
+            && rightType.isFunctionType() && leftType.isFunctionType()) {
           return true;
         }
       }
 
       mismatch(t, n,
           "assignment to property " + propName + " of " +
-          getReadableJSTypeName(owner, true),
+          typeRegistry.getReadableTypeName(owner),
           rightType, leftType);
       return false;
+    } else if (!leftType.isNoType()
+        && !rightType.isSubtypeWithoutStructuralTyping(leftType)){
+      recordStructuralInterfaceUses(rightType, leftType);
     }
     return true;
   }
@@ -442,6 +468,8 @@ class TypeValidator {
     if (!rightType.isSubtype(leftType)) {
       mismatch(t, n, msg, rightType, leftType);
       return false;
+    } else if (!rightType.isSubtypeWithoutStructuralTyping(leftType)) {
+      recordStructuralInterfaceUses(rightType, leftType);
     }
     return true;
   }
@@ -461,10 +489,12 @@ class TypeValidator {
       JSType paramType, Node callNode, int ordinal) {
     if (!argType.isSubtype(paramType)) {
       mismatch(t, n,
-          String.format("actual parameter %d of %s does not match " +
+          SimpleFormat.format("actual parameter %d of %s does not match " +
               "formal parameter", ordinal,
-              getReadableJSTypeName(callNode.getFirstChild(), false)),
+              typeRegistry.getReadableTypeNameNoDeref(callNode.getFirstChild())),
           argType, paramType);
+    } else if (!argType.isSubtypeWithoutStructuralTyping(paramType)){
+      recordStructuralInterfaceUses(argType, paramType);
     }
   }
 
@@ -517,6 +547,8 @@ class TypeValidator {
     if (!type.canCastTo(castType)) {
       registerMismatch(type, castType, report(t.makeError(n, INVALID_CAST,
           type.toString(), castType.toString())));
+    } else if (!type.isSubtypeWithoutStructuralTyping(castType)){
+      recordStructuralInterfaceUses(type, castType);
     }
   }
 
@@ -561,9 +593,9 @@ class TypeValidator {
    *     be {@code var}, but in some rare cases we will need to declare
    *     a new var with new source info.
    */
-  Var expectUndeclaredVariable(String sourceName, CompilerInput input,
-      Node n, Node parent, Var var, String variableName, JSType newType) {
-    Var newVar = var;
+  TypedVar expectUndeclaredVariable(String sourceName, CompilerInput input,
+      Node n, Node parent, TypedVar var, String variableName, JSType newType) {
+    TypedVar newVar = var;
     boolean allowDupe = false;
     if (n.isGetProp() ||
         NodeUtil.isObjectLitKey(n)) {
@@ -590,7 +622,7 @@ class TypeValidator {
       // was made in TypedScopeCreator#createInitialScope and is a
       // native type. We should redeclare it at the new input site.
       if (var.input == null) {
-        Scope s = var.getScope();
+        TypedScope s = var.getScope();
         s.undeclare(var);
         newVar = s.declare(variableName, n, varType, input, false);
 
@@ -653,7 +685,7 @@ class TypeValidator {
    */
   private void expectInterfaceProperty(NodeTraversal t, Node n,
       ObjectType instance, ObjectType implementedInterface, String prop) {
-    StaticSlot<JSType> propSlot = instance.getSlot(prop);
+    StaticTypedSlot<JSType> propSlot = instance.getSlot(prop);
     if (propSlot == null) {
       // Not implemented
       String sourceName = n.getSourceFileName();
@@ -714,16 +746,34 @@ class TypeValidator {
                      formatFoundRequired(msg, found, required))));
   }
 
+  private void recordStructuralInterfaceUses(JSType found, JSType required) {
+    boolean strictMismatch =
+        !found.isSubtypeWithoutStructuralTyping(required)
+        && !required.isSubtypeWithoutStructuralTyping(found);
+    boolean mismatch = !found.isSubtype(required) && !required.isSubtype(found);
+    if (strictMismatch && !mismatch) {
+      implicitStructuralInterfaceUses.add(new TypeMismatch(found, required, null));
+    }
+  }
+
   private void registerMismatch(JSType found, JSType required, JSError error) {
     // Don't register a mismatch for differences in null or undefined or if the
     // code didn't downcast.
     found = found.restrictByNotNullOrUndefined();
     required = required.restrictByNotNullOrUndefined();
+
     if (found.isSubtype(required) || required.isSubtype(found)) {
+      boolean strictMismatch =
+        !found.isSubtypeWithoutStructuralTyping(required)
+        && !required.isSubtypeWithoutStructuralTyping(found);
+      if (strictMismatch) {
+        implicitStructuralInterfaceUses.add(new TypeMismatch(found, required, error));
+      }
       return;
     }
 
     mismatches.add(new TypeMismatch(found, required, error));
+
     if (found.isFunctionType() &&
         required.isFunctionType()) {
       FunctionType fnTypeA = found.toMaybeFunctionType();
@@ -743,7 +793,7 @@ class TypeValidator {
   private void registerIfMismatch(
       JSType found, JSType required, JSError error) {
     if (found != null && required != null &&
-        !found.isSubtype(required)) {
+        !found.isSubtypeWithoutStructuralTyping(required)) {
       registerMismatch(found, required, error);
     }
   }
@@ -760,71 +810,6 @@ class TypeValidator {
       requiredStr = required.toAnnotationString();
     }
     return MessageFormat.format(FOUND_REQUIRED, description, foundStr, requiredStr);
-  }
-
-  /**
-   * Given a node, get a human-readable name for the type of that node so
-   * that will be easy for the programmer to find the original declaration.
-   *
-   * For example, if SubFoo's property "bar" might have the human-readable
-   * name "Foo.prototype.bar".
-   *
-   * @param n The node.
-   * @param dereference If true, the type of the node will be dereferenced
-   *     to an Object type, if possible.
-   */
-  String getReadableJSTypeName(Node n, boolean dereference) {
-    JSType type = getJSType(n);
-    if (dereference) {
-      ObjectType dereferenced = type.dereference();
-      if (dereferenced != null) {
-        type = dereferenced;
-      }
-    }
-
-    // The best type name is the actual type name.
-    if (type.isFunctionPrototypeType() ||
-        (type.toObjectType() != null &&
-         type.toObjectType().getConstructor() != null)) {
-      return type.toString();
-    }
-
-    // If we're analyzing a GETPROP, the property may be inherited by the
-    // prototype chain. So climb the prototype chain and find out where
-    // the property was originally defined.
-    if (n.isGetProp()) {
-      ObjectType objectType = getJSType(n.getFirstChild()).dereference();
-      if (objectType != null) {
-        String propName = n.getLastChild().getString();
-        if (objectType.getConstructor() != null &&
-            objectType.getConstructor().isInterface()) {
-          objectType = FunctionType.getTopDefiningInterface(
-              objectType, propName);
-        } else {
-          // classes
-          while (objectType != null && !objectType.hasOwnProperty(propName)) {
-            objectType = objectType.getImplicitPrototype();
-          }
-        }
-
-        // Don't show complex function names or anonymous types.
-        // Instead, try to get a human-readable type name.
-        if (objectType != null &&
-            (objectType.getConstructor() != null ||
-             objectType.isFunctionPrototypeType())) {
-          return objectType.toString() + "." + propName;
-        }
-      }
-    }
-
-    if (n.isQualifiedName()) {
-      return n.getQualifiedName();
-    } else if (type.isFunctionType()) {
-      // Don't show complex function names.
-      return "function";
-    } else {
-      return type.toString();
-    }
   }
 
   /**
@@ -849,9 +834,7 @@ class TypeValidator {
   }
 
   private JSError report(JSError error) {
-    if (shouldReport) {
-      compiler.report(error);
-    }
+    compiler.report(error);
     return error;
   }
 

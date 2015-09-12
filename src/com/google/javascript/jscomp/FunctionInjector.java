@@ -19,12 +19,12 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Supplier;
-import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.ExpressionDecomposer.DecompositionType;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -39,7 +39,7 @@ class FunctionInjector {
 
   private final AbstractCompiler compiler;
   private final boolean allowDecomposition;
-  private Set<String> knownConstants = Sets.newHashSet();
+  private Set<String> knownConstants = new HashSet<>();
   private final boolean assumeStrictThis;
   private final boolean assumeMinimumCapture;
   private final Supplier<String> safeNameIdSupplier;
@@ -559,7 +559,7 @@ class FunctionInjector {
   }
 
   private static void removeConstantVarAnnotation(Scope scope, String name) {
-    Scope.Var var = scope.getVar(name);
+    Var var = scope.getVar(name);
     Node nameNode = var == null ? null : var.getNameNode();
     if (nameNode == null) return;
 
@@ -644,7 +644,6 @@ class FunctionInjector {
       Reference ref, final Node fnNode,
       Set<String> namesToAlias) {
     final boolean assumeMinimumCapture = this.assumeMinimumCapture;
-
     // Note: functions that contain function definitions are filtered out
     // in isCandidateFunction.
 
@@ -660,9 +659,8 @@ class FunctionInjector {
         new NodeUtil.MatchDeclaration(),
         new NodeUtil.MatchShallowStatement());
     boolean forbidTemps = false;
-    if (!ref.scope.isGlobal()) {
-      Node fnCaller = ref.scope.getRootNode();
-      Node fnCallerBody = fnCaller.getLastChild();
+    if (!ref.scope.getClosestHoistScope().isGlobal()) {
+      Node fnCallerBody = ref.scope.getClosestHoistScope().getRootNode();
 
       // Don't allow any new vars into a scope that contains eval or one
       // that contains functions (excluding the function being inlined).
@@ -678,8 +676,7 @@ class FunctionInjector {
           return false;
         }
       };
-      forbidTemps = NodeUtil.has(fnCallerBody,
-          match, NodeUtil.MATCH_NOT_FUNCTION);
+      forbidTemps = NodeUtil.has(fnCallerBody, match, NodeUtil.MATCH_NOT_FUNCTION);
     }
 
     if (fnContainsVars && forbidTemps) {
@@ -695,7 +692,7 @@ class FunctionInjector {
       boolean hasArgs = !args.isEmpty();
       if (hasArgs) {
         // Limit the inlining
-        Set<String> allNamesToAlias = Sets.newHashSet(namesToAlias);
+        Set<String> allNamesToAlias = new HashSet<>(namesToAlias);
         FunctionArgumentInjector.maybeAddTempsForCallArguments(
             fnNode, args, allNamesToAlias, compiler.getCodingConvention());
         if (!allNamesToAlias.isEmpty()) {
@@ -751,7 +748,7 @@ class FunctionInjector {
     boolean hasArgs = !args.isEmpty();
     if (hasArgs) {
       // Limit the inlining
-      Set<String> allNamesToAlias = Sets.newHashSet(namesToAlias);
+      Set<String> allNamesToAlias = new HashSet<>(namesToAlias);
       FunctionArgumentInjector.maybeAddTempsForCallArguments(
           fnNode, args, allNamesToAlias, compiler.getCodingConvention());
       if (!allNamesToAlias.isEmpty()) {
@@ -844,10 +841,7 @@ class FunctionInjector {
       // Special case single reference function that are being block inlined:
       // If the cost of the inline is greater than the function definition size,
       // don't inline.
-      if (blockInlines > 0 && costDeltaBlock > 0) {
-        return false;
-      }
-      return true;
+      return blockInlines <= 0 || costDeltaBlock <= 0;
     }
 
     int costDelta = (directInlines * costDeltaDirect) +

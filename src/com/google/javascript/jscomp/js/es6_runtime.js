@@ -20,149 +20,144 @@
  * @author mattloring@google.com (Matthew Loring)
  */
 
-/** @const */
-$jscomp = $jscomp || {};
+
+
+/** The global object. */
+$jscomp.global = this;
 
 /**
- * @constructor
- * @template T
+ * This is needed to make things work in IE11. Otherwise we get an error:
+ * "Variable undefined in strict mode"
+ * TODO(tbreisacher): Investigate.
+ * @suppress {duplicate}
  */
-$jscomp.IteratorResult = function() {};
-
+var Symbol;
 
 /**
- * @type {boolean}
+ * Initializes the Symbol function.
+ * @suppress {reportUnknownTypes}
  */
-$jscomp.IteratorResult.prototype.done;
+$jscomp.initSymbol = function() {
+  if (!$jscomp.global.Symbol) {
+    Symbol = $jscomp.Symbol;
+  }
+
+  // Only need to do this once. All future calls are no-ops.
+  $jscomp.initSymbol = function() {};
+};
 
 
-/**
- * @type {T}
- */
-$jscomp.IteratorResult.prototype.value;
-
-
-
-/**
- * @interface
- * @template T
- */
-$jscomp.Iterator = function() {};
-
-
-/**
- * @param {Object=} def
- * @return {!$jscomp.IteratorResult.<T>}
- */
-$jscomp.Iterator.prototype.next;
-
+/** @private {number} */
+$jscomp.symbolCounter_ = 0;
 
 
 /**
- * @interface
- * @template T
+ * Produces "symbols" (actually just unique strings).
+ * @param {string} description
+ * @return {symbol}
  */
-$jscomp.Iterable = function() {};
+$jscomp.Symbol = function(description) {
+  return /** @type {symbol} */ (
+      'jscomp_symbol_' + description + ($jscomp.symbolCounter_++));
+};
 
 
 /**
- * @return {!$jscomp.Iterator.<T>}
+ * Initializes Symbol.iterator, if it's not already defined.
+ * @suppress {reportUnknownTypes}
  */
-$jscomp.Iterable.prototype.$$iterator = function() {};
+$jscomp.initSymbolIterator = function() {
+  $jscomp.initSymbol();
+  if (!Symbol.iterator) {
+    Symbol.iterator = Symbol('iterator');
+  }
+
+  // Only need to do this once. All future calls are no-ops.
+  $jscomp.initSymbolIterator = function() {};
+};
 
 
 /**
  * Creates an iterator for the given iterable.
  *
- * @param {!Array.<T>|!$jscomp.Iterable.<T>} iterable
- * @return {!$jscomp.Iterator.<T>}
+ * @param {string|!Array<T>|!Iterable<T>|!Iterator<T>} iterable
+ * @return {!Iterator<T>}
  * @template T
+ * @suppress {reportUnknownTypes}
  */
 $jscomp.makeIterator = function(iterable) {
-  if (iterable.$$iterator) {
-    return iterable.$$iterator();
+  $jscomp.initSymbolIterator();
+
+  if (iterable[Symbol.iterator]) {
+    return iterable[Symbol.iterator]();
   }
-  if (!(iterable instanceof Array)) {
-    throw new Error();
+  if (!(iterable instanceof Array) && typeof iterable != 'string') {
+    throw new Error(iterable + ' is not iterable');
   }
   var index = 0;
-  return /** @type {!$jscomp.Iterator} */ ({
+  return /** @type {!Iterator} */ ({
     next: function() {
       if (index == iterable.length) {
-        return /** @type {!$jscomp.IteratorResult} */ ({ done: true });
+        return { done: true };
       } else {
-        return /** @type {!$jscomp.IteratorResult} */ ({
+        return {
           done: false,
           value: iterable[index++]
-        });
+        };
       }
     }
   });
 };
 
 /**
- * Transfers properties on the from object onto the to object.
+ * Inherit the prototype methods and static methods from one constructor
+ * into another.
  *
- * @param {Object} to
- * @param {Object} from
- */
-$jscomp.copyProperties = function(to, from) {
-  for (var p in from) {
-    to[p] = from[p];
-  }
-};
-
-/**
- * Inherit the prototype methods from one constructor into another.
- *
- * NOTE: This is a copy of goog.inherits moved here to remove dependency on
- * the closure library for Es6ToEs3 transpilation.
+ * This wires up the prototype chain (like goog.inherits) and copies static
+ * properties, for ES6-to-ES{3,5} transpilation.
  *
  * Usage:
  * <pre>
- * function ParentClass(a, b) { }
- * ParentClass.prototype.foo = function(a) { };
+ *   function ParentClass() {}
  *
- * function ChildClass(a, b, c) {
- *   ChildClass.base(this, 'constructor', a, b);
- * }
- * $jscomp$inherits(ChildClass, ParentClass);
+ *   // Regular method.
+ *   ParentClass.prototype.foo = function(a) {};
  *
- * var child = new ChildClass('a', 'b', 'see');
- * child.foo(); // This works.
+ *   // Static method.
+ *   ParentClass.bar = function() {};
+ *
+ *   function ChildClass() {
+ *     ParentClass.call(this);
+ *   }
+ *   $jscomp.inherits(ChildClass, ParentClass);
+ *
+ *   var child = new ChildClass();
+ *   child.foo();
+ *   ChildClass.bar();  // Static inheritance.
  * </pre>
  *
- * @param {Function} childCtor Child class.
- * @param {Function} parentCtor Parent class.
+ * @param {!Function} childCtor Child class.
+ * @param {!Function} parentCtor Parent class.
  */
 $jscomp.inherits = function(childCtor, parentCtor) {
   /** @constructor */
   function tempCtor() {}
   tempCtor.prototype = parentCtor.prototype;
-  childCtor.superClass_ = parentCtor.prototype;
   childCtor.prototype = new tempCtor();
   /** @override */
   childCtor.prototype.constructor = childCtor;
 
-  /**
-   * Calls superclass constructor/method.
-   *
-   * This function is only available if you use $jscomp$inherits to
-   * express inheritance relationships between classes.
-   *
-   * NOTE: This is a replacement for goog.base and for superClass_
-   * property defined in childCtor.
-   *
-   * @param {!Object} me Should always be "this".
-   * @param {string} methodName The method name to call. Calling
-   *     superclass constructor can be done with the special string
-   *     'constructor'.
-   * @param {...*} var_args The arguments to pass to superclass
-   *     method/constructor.
-   * @return {*} The return value of the superclass method/constructor.
-   */
-  childCtor.base = function(me, methodName, var_args) {
-    var args = Array.prototype.slice.call(arguments, 2);
-    return parentCtor.prototype[methodName].apply(me, args);
-  };
+  for (var p in parentCtor) {
+    if ($jscomp.global.Object.defineProperties) {
+      var descriptor = $jscomp.global.Object.getOwnPropertyDescriptor(
+          parentCtor, p);
+      // TODO(tbreisacher): Remove this check when Function.inherits is gone.
+      if (descriptor !== undefined) {
+        $jscomp.global.Object.defineProperty(childCtor, p, descriptor);
+      }
+    } else {
+      // Pre-ES5 browser. Just copy with an assignment.
+      childCtor[p] = parentCtor[p];
+    }
+  }
 };

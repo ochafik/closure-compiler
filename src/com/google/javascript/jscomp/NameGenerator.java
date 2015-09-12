@@ -16,12 +16,12 @@
 
 package com.google.javascript.jscomp;
 
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.google.common.primitives.Chars;
 import com.google.javascript.rhino.TokenStream;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -41,7 +41,7 @@ final class NameGenerator {
    */
   private static final class CharPriority implements Comparable<CharPriority>{
     final char name;
-    int occurance;
+    int occurrence;
 
     // This is a tie-breaker when two chars occurrence count is the same.
     // When that happens, the 'natural' order prevails.
@@ -49,13 +49,13 @@ final class NameGenerator {
     CharPriority(char name, int order) {
       this.name = name;
       this.order = order;
-      this.occurance = 0;
+      this.occurrence = 0;
     }
 
     @Override
     public int compareTo(CharPriority other) {
-      // Start out by putting the element with more occurance first.
-      int result = other.occurance - this.occurance;
+      // Start out by putting the element with more occurrence first.
+      int result = other.occurrence - this.occurrence;
       if (result != 0) {
         return result;
       }
@@ -108,8 +108,7 @@ final class NameGenerator {
     this.reservedNames = reservedNames;
     this.prefix = prefix;
 
-    this.priorityLookupMap = Maps.newHashMapWithExpectedSize(
-        NONFIRST_CHAR.length);
+    this.priorityLookupMap = new HashMap<>(NONFIRST_CHAR.length);
 
     int order = 0;
     for (char c : NONFIRST_CHAR) {
@@ -144,7 +143,7 @@ final class NameGenerator {
     for (int i = 0; i < sequence.length(); i++) {
       CharPriority c = priorityLookupMap.get(sequence.charAt(i));
       if (c != null) {
-        c.occurance++;
+        c.occurrence++;
       }
     }
   }
@@ -164,7 +163,7 @@ final class NameGenerator {
       }
       return result;
     }
-    Set<Character> charSet = Sets.newLinkedHashSet(Chars.asList(chars));
+    Set<Character> charSet = new LinkedHashSet<>(Chars.asList(chars));
     for (char reservedCharacter : reservedCharacters) {
       charSet.remove(reservedCharacter);
     }

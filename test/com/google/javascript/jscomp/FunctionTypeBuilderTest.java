@@ -29,7 +29,7 @@ import java.util.List;
  * Unit tests for {@link FunctionTypeBuilder}.
  *
  */
-public class FunctionTypeBuilderTest extends CompilerTestCase {
+public final class FunctionTypeBuilderTest extends CompilerTestCase {
 
   public FunctionTypeBuilderTest() {
     parseTypeInfo = true;
@@ -113,7 +113,7 @@ public class FunctionTypeBuilderTest extends CompilerTestCase {
         "", FunctionTypeBuilder.TYPE_REDEFINITION,
         "attempted re-definition of type Function\n"
         + "found   : function (new:Function, ?=): ?\n"
-        + "expected: function (new:Function, ...[*]): ?");
+        + "expected: function (new:Function, ...*): ?");
   }
 
   public void testInlineJsDoc() throws Exception {

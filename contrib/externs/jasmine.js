@@ -181,10 +181,24 @@ jasmine.Matchers.prototype.toThrow = function(opt_expected) {};
 
 
 /**
+ * @param {Object} value
+ * @return {string}
+ */
+jasmine.pp = function(value) {};
+
+
+/**
  * @param {!Object} clazz
  * @return {!jasmine.Matchers}
  */
 jasmine.any = function(clazz) {};
+
+
+/**
+ * @param {!Object} sample
+ * @return {!jasmine.Matchers}
+ */
+jasmine.objectContaining = function(sample) {};
 
 
 /** @constructor */
@@ -408,8 +422,16 @@ function it(description, handler) {}
 
 
 /**
+ * @param {string} description
+ * @param {function(this:jasmine.Spec)} handler
+ */
+function iit(description, handler) {}
+
+
+/**
  * Provided by angular-mocks.js.
  * @param {...(string|Function|Array.<(string,Function)>)} var_args
+ * @suppress {checkTypes}
  */
 function module(var_args) {}
 
@@ -447,7 +469,6 @@ function xdescribe(description, handler) {}
 
 
 /**
- * @nosideeffects
  * @param {string} description
  * @param {function(this:jasmine.Spec)} handler
  */

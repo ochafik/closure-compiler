@@ -21,7 +21,6 @@ import com.google.common.base.Predicate;
 import com.google.javascript.jscomp.CodingConvention.SubclassRelationship;
 import com.google.javascript.jscomp.ReferenceCollectingCallback.Reference;
 import com.google.javascript.jscomp.ReferenceCollectingCallback.ReferenceCollection;
-import com.google.javascript.jscomp.Scope.Var;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
@@ -58,7 +57,7 @@ class CrossModuleCodeMotion implements CompilerPass {
    * NOTE - I made this a LinkedHashMap to make testing easier. With a regular
    * HashMap, the variables may not output in a consistent order
    */
-  private final Map<Scope.Var, NamedInfo> namedInfo =
+  private final Map<Var, NamedInfo> namedInfo =
       new LinkedHashMap<>();
 
   private final Map<Node, InstanceofInfo> instanceofNodes =
@@ -261,9 +260,9 @@ class CrossModuleCodeMotion implements CompilerPass {
     // Recursive definition should not block movement.
     String name = ref.getNode().getString();
     boolean recursive = false;
-    Node rootNode = ref.getScope().getRootNode();
-    if (rootNode.isFunction()) {
-
+    Scope hoistTarget = ref.getScope().getClosestHoistScope();
+    if (hoistTarget.isFunctionBlockScope()) {
+      Node rootNode = hoistTarget.getRootNode().getParent();
       // CASE #1:
       String scopeFuncName = rootNode.getFirstChild().getString();
       Node scopeFuncParent = rootNode.getParent();
@@ -309,7 +308,7 @@ class CrossModuleCodeMotion implements CompilerPass {
                 !compiler.getCodingConvention().isExported(var.getName());
           }
         });
-    NodeTraversal.traverse(compiler, root, collector);
+    NodeTraversal.traverseEs6(compiler, root, collector);
 
     for (Var v : collector.getAllSymbols()) {
       ReferenceCollection refCollection = collector.getReferences(v);
@@ -369,7 +368,7 @@ class CrossModuleCodeMotion implements CompilerPass {
       ReferenceCollectingCallback collector, Reference ref, NamedInfo info) {
     Node name = ref.getNode();
     Node parent = name.getParent();
-    Node gramps = parent.getParent();
+    Node grandparent = parent.getParent();
     switch (parent.getType()) {
       case Token.VAR:
         if (canMoveValue(collector, ref.getScope(), name.getFirstChild())) {
@@ -412,7 +411,7 @@ class CrossModuleCodeMotion implements CompilerPass {
         return false;
 
       case Token.CALL:
-        if (NodeUtil.isExprCall(gramps)) {
+        if (NodeUtil.isExprCall(grandparent)) {
           SubclassRelationship relationship =
               compiler.getCodingConvention().getClassesDefinedByCall(parent);
           if (relationship != null &&

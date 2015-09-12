@@ -20,7 +20,7 @@ package com.google.javascript.jscomp;
 
 
 import com.google.javascript.rhino.Node;
-import com.google.javascript.rhino.jstype.StaticSourceFile;
+import com.google.javascript.rhino.StaticSourceFile;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -163,7 +163,7 @@ public class GoogleCodingConvention extends CodingConventions.Proxy {
     if (m.find()) {
       return m.group(1);
     } else {
-      int lastSlash = name.lastIndexOf("/");
+      int lastSlash = name.lastIndexOf('/');
       return lastSlash == -1 ? "" : name.substring(0, lastSlash);
     }
   }

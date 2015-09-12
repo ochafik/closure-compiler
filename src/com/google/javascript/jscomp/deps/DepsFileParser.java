@@ -16,16 +16,19 @@
 
 package com.google.javascript.jscomp.deps;
 
+import com.google.common.annotations.GwtIncompatible;
 import com.google.common.base.CharMatcher;
 import com.google.common.base.Function;
 import com.google.common.base.Functions;
-import com.google.common.collect.Lists;
+import com.google.common.io.Files;
 import com.google.javascript.jscomp.ErrorManager;
 
-import java.io.FileReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -39,7 +42,8 @@ import java.util.regex.Pattern;
  *
  * @author agrieve@google.com (Andrew Grieve)
  */
-public class DepsFileParser extends JsFileLineParser {
+@GwtIncompatible("java.util.regex")
+public final class DepsFileParser extends JsFileLineParser {
 
   private static Logger logger = Logger.getLogger(DepsFileParser.class.getName());
 
@@ -94,7 +98,7 @@ public class DepsFileParser extends JsFileLineParser {
    * @throws IOException Thrown if the file could not be read.
    */
   public List<DependencyInfo> parseFile(String filePath) throws IOException {
-    return parseFileReader(filePath, new FileReader(filePath));
+    return parseFileReader(filePath, Files.newReader(new File(filePath), StandardCharsets.UTF_8));
   }
 
   /**
@@ -120,7 +124,7 @@ public class DepsFileParser extends JsFileLineParser {
    * @return A list of DependencyInfo objects.
    */
   public List<DependencyInfo> parseFileReader(String filePath, Reader reader) {
-    depInfos = Lists.newArrayList();
+    depInfos = new ArrayList<>();
     logger.fine("Parsing Dep: " + filePath);
     doParse(filePath, reader);
     return depInfos;

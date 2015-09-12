@@ -17,11 +17,11 @@
 package com.google.javascript.jscomp;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Maps;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
@@ -68,14 +68,14 @@ class NameAnonymousFunctionsMapped implements CompilerPass {
             Collections.<String>emptySet();
     this.nameGenerator = new NameGenerator(reserved, PREFIX_STRING, null);
     this.previousMap = previousMap;
-    this.renameMap = Maps.newHashMap();
+    this.renameMap = new HashMap<>();
   }
 
   @Override
   public void process(Node externs, Node root) {
     AnonymousFunctionNamingCallback namingCallback =
         new AnonymousFunctionNamingCallback(new MappedFunctionNamer());
-    NodeTraversal.traverse(compiler, root, namingCallback);
+    NodeTraversal.traverseEs6(compiler, root, namingCallback);
     logger.fine("Named " + namedCount + " anon functions using " +
         bytesUsed + " bytes");
     if (namedCount > 0) {

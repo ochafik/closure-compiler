@@ -146,7 +146,7 @@ public class EnumElementType extends ObjectType {
   String toStringHelper(boolean forAnnotations) {
     return forAnnotations ?
         primitiveType.toString() :
-        (getReferenceName() + ".<" + primitiveType + ">");
+        (getReferenceName() + "<" + primitiveType + ">");
   }
 
   @Override
@@ -161,10 +161,16 @@ public class EnumElementType extends ObjectType {
 
   @Override
   public boolean isSubtype(JSType that) {
-    if (JSType.isSubtypeHelper(this, that)) {
+    return isSubtype(that, ImplCache.create());
+  }
+
+  @Override
+  protected boolean isSubtype(JSType that,
+      ImplCache implicitImplCache) {
+    if (JSType.isSubtypeHelper(this, that, implicitImplCache)) {
       return true;
     } else {
-      return primitiveType.isSubtype(that);
+      return primitiveType.isSubtype(that, implicitImplCache);
     }
   }
 
@@ -238,7 +244,7 @@ public class EnumElementType extends ObjectType {
   }
 
   @Override
-  JSType resolveInternal(ErrorReporter t, StaticScope<JSType> scope) {
+  JSType resolveInternal(ErrorReporter t, StaticTypedScope<JSType> scope) {
     primitiveType = primitiveType.resolve(t, scope);
     primitiveObjectType = ObjectType.cast(primitiveType);
     return this;

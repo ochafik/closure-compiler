@@ -16,13 +16,15 @@
 
 package com.google.javascript.jscomp;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.google.common.collect.ImmutableMap;
 
 /**
  * Test cases for {@link NameAnonymousFunctionsMapped}.
  *
  */
-public class NameAnonymousFunctionsMappedTest extends CompilerTestCase {
+public final class NameAnonymousFunctionsMappedTest extends CompilerTestCase {
   private static final String EXTERNS = "var document;";
 
   private NameAnonymousFunctionsMapped pass;
@@ -55,8 +57,7 @@ public class NameAnonymousFunctionsMappedTest extends CompilerTestCase {
       String s = functionMap.lookupSourceName(pairs[i]);
       assertEquals(pairs[i + 1], s);
     }
-    assertEquals(pairs.length / 2,
-        functionMap.getNewNameToOriginalNameMap().size());
+    assertThat(functionMap.getNewNameToOriginalNameMap()).hasSize(pairs.length / 2);
   }
 
   public void testSimpleVarAssignment1() {

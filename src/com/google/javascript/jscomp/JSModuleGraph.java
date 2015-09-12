@@ -16,6 +16,7 @@
 
 package com.google.javascript.jscomp;
 
+import com.google.common.annotations.GwtIncompatible;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
@@ -23,23 +24,26 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
-import com.google.common.collect.Sets;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonPrimitive;
+import com.google.javascript.jscomp.deps.ClosureSortedDependencies;
+import com.google.javascript.jscomp.deps.Es6SortedDependencies;
 import com.google.javascript.jscomp.deps.SortedDependencies;
 import com.google.javascript.jscomp.deps.SortedDependencies.CircularDependencyException;
 import com.google.javascript.jscomp.deps.SortedDependencies.MissingProvideException;
 import com.google.javascript.jscomp.graph.LinkedDirectedGraph;
+import com.google.javascript.jscomp.parsing.parser.util.format.SimpleFormat;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,11 +52,11 @@ import java.util.TreeSet;
 /**
  * A {@link JSModule} dependency graph that assigns a depth to each module and
  * can answer depth-related queries about them. For the purposes of this class,
- * a module's depth is defined as the number of hops in the longest path from
- * the module to a module with no dependencies.
+ * a module's depth is defined as the number of hops in the longest (non cyclic)
+ * path from the module to a module with no dependencies.
  *
  */
-public class JSModuleGraph {
+public final class JSModuleGraph {
 
   private List<JSModule> modules;
 
@@ -74,7 +78,7 @@ public class JSModuleGraph {
    * dependencyMap should be filled from leaf to root so that
    * getTransitiveDepsDeepestFirst can use its results directly.
    */
-  private Map<JSModule, Set<JSModule>> dependencyMap = Maps.newHashMap();
+  private Map<JSModule, Set<JSModule>> dependencyMap = new HashMap<>();
 
   /**
    * Creates a module graph from a list of modules in dependency order.
@@ -88,17 +92,17 @@ public class JSModuleGraph {
    */
   public JSModuleGraph(List<JSModule> modulesInDepOrder) {
     Preconditions.checkState(
-        modulesInDepOrder.size() == Sets.newHashSet(modulesInDepOrder).size(),
+        modulesInDepOrder.size() == new HashSet<>(modulesInDepOrder).size(),
         "Found duplicate modules");
     modules = ImmutableList.copyOf(modulesInDepOrder);
-    modulesByDepth = Lists.newArrayList();
+    modulesByDepth = new ArrayList<>();
 
     for (JSModule module : modulesInDepOrder) {
       int depth = 0;
       for (JSModule dep : module.getDependencies()) {
         int depDepth = dep.getDepth();
         if (depDepth < 0) {
-          throw new ModuleDependenceException(String.format(
+          throw new ModuleDependenceException(SimpleFormat.format(
               "Modules not in dependency order: %s preceded %s",
               module.getName(), dep.getName()),
               module, dep);
@@ -125,7 +129,7 @@ public class JSModuleGraph {
    * Gets all modules indexed by name.
    */
   Map<String, JSModule> getModulesByName() {
-    Map<String, JSModule> result = Maps.newHashMap();
+    Map<String, JSModule> result = new HashMap<>();
     for (JSModule m : modules) {
       result.put(m.getName(), m);
     }
@@ -155,6 +159,7 @@ public class JSModuleGraph {
    * - "inputs" (list of file names)
    * @return List of module JSONObjects.
    */
+  @GwtIncompatible("com.google.gson")
   JsonArray toJson() {
     JsonArray modules = new JsonArray();
     for (JSModule module : getAllModules()) {
@@ -372,7 +377,9 @@ public class JSModuleGraph {
           MissingModuleException {
 
     SortedDependencies<CompilerInput> sorter =
-        new SortedDependencies<>(inputs);
+        depOptions.isEs6ModuleOrder()
+            ? new Es6SortedDependencies<>(inputs) : new ClosureSortedDependencies<>(inputs);
+
     Iterable<CompilerInput> entryPointInputs = createEntryPointInputs(
         depOptions, inputs, sorter);
 
@@ -424,12 +431,12 @@ public class JSModuleGraph {
     }
 
     // Now, generate the sorted result.
-    List<CompilerInput> result = Lists.newArrayList();
+    ImmutableList.Builder<CompilerInput> result = ImmutableList.builder();
     for (JSModule module : getAllModules()) {
       result.addAll(module.getInputs());
     }
 
-    return result;
+    return result.build();
   }
 
   private Collection<CompilerInput> createEntryPointInputs(
@@ -437,7 +444,7 @@ public class JSModuleGraph {
       List<CompilerInput> inputs,
       SortedDependencies<CompilerInput> sorter)
       throws MissingModuleException, MissingProvideException {
-    Set<CompilerInput> entryPointInputs = Sets.newLinkedHashSet();
+    Set<CompilerInput> entryPointInputs = new LinkedHashSet<>();
     Map<String, JSModule> modulesByName = getModulesByName();
 
     if (depOptions.shouldPruneDependencies()) {
@@ -480,6 +487,7 @@ public class JSModuleGraph {
     return entryPointInputs;
   }
 
+  @SuppressWarnings("unused")
   LinkedDirectedGraph<JSModule, String> toGraphvizGraph() {
     LinkedDirectedGraph<JSModule, String> graphViz =
         LinkedDirectedGraph.create();

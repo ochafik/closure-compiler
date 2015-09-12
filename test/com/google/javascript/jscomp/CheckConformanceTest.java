@@ -16,51 +16,59 @@
 
 package com.google.javascript.jscomp;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.javascript.jscomp.CheckConformance.InvalidRequirementSpec;
 import com.google.javascript.jscomp.ConformanceRules.AbstractRule;
 import com.google.javascript.jscomp.ConformanceRules.ConformanceResult;
+import com.google.javascript.jscomp.testing.BlackHoleErrorManager;
 import com.google.javascript.rhino.Node;
 import com.google.protobuf.TextFormat;
+
+import java.util.List;
 
 /**
  * Tests for {@link CheckConformance}.
  *
  */
-public class CheckConformanceTest extends CompilerTestCase {
+public final class CheckConformanceTest extends CompilerTestCase {
   private String configuration;
 
   private static final String EXTERNS =
-      "/** @constructor */ var Window;\n" +
-      "/** @type {Window} */ var window;\n" +
-      "var Object;\n" +
-      "/** @constructor */ var Arguments;\n" +
-      "Arguments.prototype.callee;\n" +
-      "Arguments.prototype.caller;\n" +
-      "/** @type {Arguments} */ var arguments;\n" +
-      "/** @constructor \n" +
-      " * @param {*=} opt_message\n" +
-      " * @param {*=} opt_file\n" +
-      " * @param {*=} opt_line\n" +
-      " * @return {!Error} \n" +
-      "*/" +
-      "var Error;" +
-      "var alert;" +
-      "";
+      LINE_JOINER.join(
+          "/** @constructor */ var Window;",
+          "/** @type {Window} */ var window;",
+          "var Object;",
+          "/** @constructor */ var Arguments;",
+          "Arguments.prototype.callee;",
+          "Arguments.prototype.caller;",
+          "/** @type {Arguments} */ var arguments;",
+          "/** @constructor ",
+          " * @param {*=} opt_message",
+          " * @param {*=} opt_file",
+          " * @param {*=} opt_line",
+          " * @return {!Error}",
+          "*/",
+          "var Error;",
+          "var alert;",
+          "var unknown;",
+          "/** @constructor */ var ObjectWithNoProps;");
 
   private static final String DEFAULT_CONFORMANCE =
-      "requirement: {\n" +
-      "  type: BANNED_NAME\n" +
-      "  value: 'eval'\n" +
-      "   error_message: 'eval is not allowed'\n" +
-      "}\n" +
-      "" +
-      "requirement: {\n" +
-      "  type: BANNED_PROPERTY\n" +
-      "  value: 'Arguments.prototype.callee'\n" +
-      "  error_message: 'Arguments.prototype.callee is not allowed'\n" +
-      "}\n";
+      LINE_JOINER.join(
+          "requirement: {",
+          "  type: BANNED_NAME",
+          "  value: 'eval'",
+          "   error_message: 'eval is not allowed'",
+          "}",
+          "",
+          "requirement: {",
+          "  type: BANNED_PROPERTY",
+          "  value: 'Arguments.prototype.callee'",
+          "  error_message: 'Arguments.prototype.callee is not allowed'",
+          "}");
 
   public CheckConformanceTest() {
     super(EXTERNS, true);
@@ -71,11 +79,10 @@ public class CheckConformanceTest extends CompilerTestCase {
 
   @Override
   protected CompilerOptions getOptions() {
-    CompilerOptions options = new CompilerOptions();
-    super.getOptions(options);
+    CompilerOptions options = super.getOptions();
     options.setWarningLevel(
         DiagnosticGroups.MISSING_PROPERTIES, CheckLevel.OFF);
-    // options.setConformanceConfig(this.conformanceConfig);
+    options.setCodingConvention(getCodingConvention());
     return options;
   }
 
@@ -83,6 +90,7 @@ public class CheckConformanceTest extends CompilerTestCase {
   protected void setUp() throws Exception {
     super.setUp();
     super.enableTypeCheck(CheckLevel.OFF);
+    super.enableClosurePass();
     configuration = DEFAULT_CONFORMANCE;
   }
 
@@ -212,6 +220,73 @@ public class CheckConformanceTest extends CompilerTestCase {
 
     testSame(
         "eval()");
+  }
+
+  public void testFileOnOnlyApplyToIsChecked() {
+    configuration =
+        "requirement: {\n" +
+        "  type: BANNED_NAME\n" +
+        "  value: 'eval'\n" +
+        "  error_message: 'eval is not allowed'\n" +
+        "  only_apply_to: 'foo.js'\n " +
+        "}";
+    ImmutableList<SourceFile> input = ImmutableList.of(
+            SourceFile.fromCode("foo.js", "eval()"));
+    test(input, input, null, CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: eval is not allowed");
+  }
+
+  public void testFileNotOnOnlyApplyToIsNotChecked() {
+    configuration =
+        "requirement: {\n" +
+        "  type: BANNED_NAME\n" +
+        "  value: 'eval'\n" +
+        "  error_message: 'eval is not allowed'\n" +
+        "  only_apply_to: 'foo.js'\n " +
+        "}";
+    testSame(ImmutableList.of(SourceFile.fromCode("bar.js", "eval()")));
+  }
+
+  public void testFileOnOnlyApplyToRegexpIsChecked() {
+    configuration =
+        "requirement: {\n" +
+        "  type: BANNED_NAME\n" +
+        "  value: 'eval'\n" +
+        "  error_message: 'eval is not allowed'\n" +
+        "  only_apply_to_regexp: 'test.js$'\n " +
+        "}";
+    ImmutableList<SourceFile> input = ImmutableList.of(
+            SourceFile.fromCode("foo_test.js", "eval()"));
+    test(input, input, null, CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: eval is not allowed");
+  }
+
+  public void testFileNotOnOnlyApplyToRegexpIsNotChecked() {
+    configuration =
+        "requirement: {\n" +
+        "  type: BANNED_NAME\n" +
+        "  value: 'eval'\n" +
+        "  error_message: 'eval is not allowed'\n" +
+        "  only_apply_to_regexp: 'test.js$'\n " +
+        "}";
+    testSame(ImmutableList.of(SourceFile.fromCode("bar.js", "eval()")));
+  }
+
+  public void testSpecifyingWhitelistAndOnlyApplyToIsRuntimeError() {
+    configuration =
+        "requirement: {\n" +
+        "  type: BANNED_NAME\n" +
+        "  value: 'eval'\n" +
+        "  error_message: 'eval is not allowed'\n" +
+        "  whitelist: 'blah'\n" +
+        "  only_apply_to_regexp: 'test.js$'\n " +
+        "}";
+    try {
+      testSame(ImmutableList.of(SourceFile.fromCode("bar.js", "eval()")));
+      fail("expected IllegalArgumentException");
+    } catch (Exception e) {
+      assertThat(e).isInstanceOf(IllegalArgumentException.class);
+    }
   }
 
   public void testBannedCodePattern1() {
@@ -758,6 +833,7 @@ public class CheckConformanceTest extends CompilerTestCase {
         "  error_message: 'BanExpose Message'\n" +
         "}";
 
+    setExpectParseWarningsThisTest();
     testSame(
         EXTERNS,
         "/** @expose */ var x;",
@@ -832,6 +908,93 @@ public class CheckConformanceTest extends CompilerTestCase {
         "function f() {alert(/** @type {Error} */(this));}");
   }
 
+  public void testCustomBanUnknownThis4() {
+    configuration =
+        "requirement: {\n" +
+        "  type: CUSTOM\n" +
+        "  java_class: 'com.google.javascript.jscomp.ConformanceRules$BanUnknownThis'\n" +
+        "  error_message: 'BanUnknownThis Message'\n" +
+        "}";
+
+    testSame(
+        "function f() {goog.asserts.assertInstanceof(this, Error);}");
+  }
+
+  private String config(String rule, String message, String... fields) {
+    String result = "requirement: {\n"
+        + "  type: CUSTOM\n"
+        + "  java_class: '" + rule + "'\n";
+    for (String field : fields) {
+      result += field;
+    }
+    result += "  error_message: '" + message + "'\n" + "}";
+    return result;
+  }
+
+  private String rule(String rule) {
+    return "com.google.javascript.jscomp.ConformanceRules$" + rule;
+  }
+
+  private String value(String value) {
+    return "  value: '" + value + "'\n";
+  }
+
+  public void testCustomBanUnknownThisProp1() {
+    configuration = config(rule("BanUnknownDirectThisPropsReferences"), "My rule message");
+
+    testSame(
+        EXTERNS,
+        "/** @constructor */ function f() {};"
+        + "f.prototype.method = function() { alert(this.prop); }",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: My rule message");
+  }
+
+  public void testCustomBanUnknownThisProp2() {
+    configuration = config(rule("BanUnknownDirectThisPropsReferences"), "My rule message");
+
+    testSame(
+        EXTERNS,
+        "/** @constructor */ function f() {}"
+        + "f.prototype.method = function() { this.prop = foo; };",
+        null);
+  }
+
+  public void testCustomBanUnknownProp1() {
+    configuration =
+        config(rule("BanUnknownTypedClassPropsReferences"), "My rule message", value("String"));
+
+    testSame(
+        EXTERNS,
+        "/** @constructor */ function f() {};"
+            + "f.prototype.method = function() { alert(this.prop); }",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: My rule message\nThe property \"prop\" on type \"f\"");
+  }
+
+  public void testCustomBanUnknownProp2() {
+    configuration =
+        config(rule("BanUnknownTypedClassPropsReferences"), "My rule message", value("String"));
+
+    testSame(
+        EXTERNS,
+        LINE_JOINER.join(
+            "/** @param {ObjectWithNoProps} a */", "function f(a) { alert(a.foobar); };"),
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: My rule message\nThe property \"foobar\" on type \"(ObjectWithNoProps|null)\"");
+  }
+
+  public void testCustomBanUnknownProp3() {
+    configuration =
+        config(rule("BanUnknownTypedClassPropsReferences"), "My rule message", value("String"));
+
+    testSame(
+        EXTERNS,
+        "/** @constructor */ function f() {}"
+            + "f.prototype.method = function() { this.prop = foo; };",
+        null);
+  }
+
   public void testCustomBanGlobalVars1() {
     configuration =
         "requirement: {\n" +
@@ -863,5 +1026,212 @@ public class CheckConformanceTest extends CompilerTestCase {
         "goog.provide('x'); var x;",
         CheckConformance.CONFORMANCE_VIOLATION,
         "Violation: BanGlobalVars Message");
+  }
+
+  public void testRequireFileoverviewVisibility() {
+    configuration =
+        "requirement: {\n" +
+        "  type: CUSTOM\n" +
+        "  java_class: 'com.google.javascript.jscomp.ConformanceRules$" +
+                       "RequireFileoverviewVisibility'\n" +
+        "  error_message: 'RequireFileoverviewVisibility Message'\n" +
+        "}";
+
+    testSame(
+        EXTERNS,
+        "var foo = function() {};",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: RequireFileoverviewVisibility Message");
+
+    testSame(
+        EXTERNS,
+        "/**\n" +
+        "  * @fileoverview\n" +
+        "  */\n" +
+        "var foo = function() {};",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: RequireFileoverviewVisibility Message");
+
+    testSame(
+        EXTERNS,
+        "/**\n" +
+        "  * @package\n" +
+        "  */\n" +
+        "var foo = function() {};",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: RequireFileoverviewVisibility Message");
+
+    testSame(
+        "/**\n" +
+        "  * @fileoverview\n" +
+        "  * @package\n" +
+        "  */\n" +
+        "var foo = function() {};");
+  }
+
+  public void testNoImplicitlyPublicDecls() {
+    configuration =
+        "requirement: {\n" +
+        "  type: CUSTOM\n" +
+        "  java_class: 'com.google.javascript.jscomp.ConformanceRules$" +
+                       "NoImplicitlyPublicDecls'\n" +
+        "  error_message: 'NoImplicitlyPublicDecls Message'\n" +
+        "}";
+
+    testSame(
+        EXTERNS,
+        "goog.provide('foo.bar');\n" +
+        "/** @constructor */foo.bar.Baz = function(){};",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: NoImplicitlyPublicDecls Message");
+    testSame(
+        "/** @package\n@fileoverview */\n" +
+        "goog.provide('foo.bar');\n" +
+        "/** @constructor */foo.bar.Baz = function(){};");
+    testSame(
+        "goog.provide('foo.bar');\n" +
+        "/** @package @constructor */foo.bar.Baz = function(){};");
+
+    testSame(
+        EXTERNS,
+        "goog.provide('foo.bar');\n" +
+        "/** @public @constructor */foo.bar.Baz = function(){};\n" +
+        "/** @type {number} */foo.bar.Baz.prototype.quux = 42;",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: NoImplicitlyPublicDecls Message");
+    testSame(
+        "/** @fileoverview\n@package*/\n" +
+        "goog.provide('foo.bar');\n" +
+        "/** @public @constructor */foo.bar.Baz = function(){};\n" +
+        "/** @type {number} */foo.bar.Baz.prototype.quux = 42;");
+    testSame(
+        "goog.provide('foo.bar');\n" +
+        "/** @public @constructor */foo.bar.Baz = function(){};\n" +
+        "/** @package {number} */foo.bar.Baz.prototype.quux = 42;");
+
+    testSame(
+        EXTERNS,
+        "goog.provide('foo');\n" +
+        "/** @public @constructor */\n" +
+        "foo.Bar = function() {\n" +
+        "  /** @type {number} */ this.baz = 52;\n" +
+        "};",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: NoImplicitlyPublicDecls Message");
+    testSame(
+        "goog.provide('foo');\n" +
+        "/** @public @constructor */\n" +
+        "foo.Bar = function() {\n" +
+        "  /** @package {number} */ this.baz = 52;\n" +
+        "};");
+    testSame(
+        "/** @fileoverview\n@package */\n" +
+        "goog.provide('foo');\n" +
+        "/** @constructor */\n" +
+        "foo.Bar = function() {\n" +
+        "  /** @type {number} */ this.baz = 52;\n" +
+        "};");
+
+    testSame("goog.provide('foo.bar');");
+
+    testSame(
+        "goog.provide('foo');\n" +
+        "/** @public @constructor */" +
+        "foo.Bar = function() {};\n" +
+        "/** @public */foo.Bar.prototype.baz = function() {};\n" +
+        "/** @public @constructor @extends {foo.Bar} */\n" +
+        "foo.Quux = function() {};\n" +
+        "/** @override */foo.Quux.prototype.baz = function() {};");
+
+    // These kinds of declarations aren't currently caught by
+    // NoImplicitlyPublicDecls, but they could be.
+    testSame("var foo");
+    testSame("var foo = 42;");
+    testSame("goog.provide('foo');\n" +
+        "/** @constructor @public */foo.Bar = function() {};\n" +
+        "foo.Bar.prototype = {\n" +
+        "  baz: function(){}\n" +
+        "};");
+  }
+
+  public void testCustomBanUnresolvedType() {
+    configuration =
+        "requirement: {\n"
+        + "  type: CUSTOM\n"
+        + "  java_class: 'com.google.javascript.jscomp.ConformanceRules$BanUnresolvedType'\n"
+        + "  error_message: 'BanUnresolvedType Message'\n"
+        + "}";
+
+    testSame(
+        EXTERNS,
+        "goog.forwardDeclare('Foo');"
+        + "/** @param {Foo} a */ function f(a) {a.foo()};",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: BanUnresolvedType Message");
+  }
+
+  public void testMergeRequirements() {
+    Compiler compiler = createCompiler();
+    ConformanceConfig.Builder builder = ConformanceConfig.newBuilder();
+    builder.addRequirementBuilder().setRuleId("a").addWhitelist("x").addWhitelistRegexp("m");
+    builder.addRequirementBuilder().setExtends("a").addWhitelist("y").addWhitelistRegexp("n");
+    List<Requirement> requirements =
+        CheckConformance.mergeRequirements(compiler, ImmutableList.of(builder.build()));
+    assertThat(requirements).hasSize(1);
+    Requirement requirement = requirements.get(0);
+    assertEquals(2, requirement.getWhitelistCount());
+    assertEquals(2, requirement.getWhitelistRegexpCount());
+  }
+
+  public void testMergeRequirements_findsDuplicates() {
+    Compiler compiler = createCompiler();
+    ErrorManager errorManager = new BlackHoleErrorManager();
+    compiler.setErrorManager(errorManager);
+    ConformanceConfig.Builder builder = ConformanceConfig.newBuilder();
+    builder.addRequirementBuilder().addWhitelist("x").addWhitelist("x");
+    CheckConformance.mergeRequirements(compiler, ImmutableList.of(builder.build()));
+    assertEquals(1, errorManager.getErrorCount());
+  }
+
+  public void testCustomBanNullDeref1() {
+    configuration = config(rule("BanNullDeref"), "My rule message");
+
+    testSame(
+        EXTERNS,
+        "/** @param {string|null} n */ function f(n) { alert(n.prop); }",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: My rule message");
+
+    testSame(
+        EXTERNS,
+        "/** @param {string|null} n */ function f(n) { alert(n['prop']); }",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: My rule message");
+
+    testSame(
+        EXTERNS,
+        "/** @param {string|undefined} n */ function f(n) { alert(n.prop); }",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: My rule message");
+
+    testSame(
+        EXTERNS,
+        "/** @param {?Function} fnOrNull */ function f(fnOrNull) { fnOrNull(); }",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: My rule message");
+
+    testSame(
+        EXTERNS,
+        "/** @param {?Function} fnOrNull */ function f(fnOrNull) { new fnOrNull(); }",
+        CheckConformance.CONFORMANCE_VIOLATION,
+        "Violation: My rule message");
+
+    testSame(
+        EXTERNS,
+        "/** @param {string} n */ function f(n) { alert(n.prop); }", null);
+
+    testSame(
+        EXTERNS,
+        "/** @param {?} n */ function f(n) { alert(n.prop); }", null);
   }
 }

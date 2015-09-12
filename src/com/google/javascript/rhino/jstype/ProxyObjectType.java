@@ -232,7 +232,13 @@ public class ProxyObjectType extends ObjectType {
 
   @Override
   public boolean isSubtype(JSType that) {
-    return referencedType.isSubtype(that);
+    return referencedType.isSubtype(that, ImplCache.create());
+  }
+
+  @Override
+  protected boolean isSubtype(JSType that,
+      ImplCache implicitImplCache) {
+    return referencedType.isSubtype(that, implicitImplCache);
   }
 
   @Override
@@ -327,7 +333,7 @@ public class ProxyObjectType extends ObjectType {
   }
 
   @Override
-  JSType resolveInternal(ErrorReporter t, StaticScope<JSType> scope) {
+  JSType resolveInternal(ErrorReporter t, StaticTypedScope<JSType> scope) {
     setReferencedType(referencedType.resolve(t, scope));
     return this;
   }

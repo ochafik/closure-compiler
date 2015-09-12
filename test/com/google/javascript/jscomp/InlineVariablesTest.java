@@ -24,7 +24,7 @@ package com.google.javascript.jscomp;
  * @author kushal@google.com (Kushal Dave)
  */
 
-public class InlineVariablesTest extends CompilerTestCase {
+public final class InlineVariablesTest extends CompilerTestCase {
 
   private boolean inlineAllStrings = false;
   private boolean inlineLocalsOnly = false;
@@ -35,7 +35,6 @@ public class InlineVariablesTest extends CompilerTestCase {
 
   @Override
   public void setUp() {
-    super.enableLineNumberCheck(true);
     compareJsDoc = false;
   }
 
@@ -1151,5 +1150,12 @@ public class InlineVariablesTest extends CompilerTestCase {
         "}" +
         "window.foo = new Widget();" +
         "window.bar = search;");
+  }
+
+  // Test respect for scopes and blocks
+  public void testIssue1177() {
+    testSame("function x_64(){var x_7;for(;;);var x_68=x_7=x_7;}");
+    testSame("function x_64(){var x_7;for(;;);var x_68=x_7=x_7++;}");
+    testSame("function x_64(){var x_7;for(;;);var x_68=x_7=x_7*2;}");
   }
 }

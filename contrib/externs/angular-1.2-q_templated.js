@@ -16,10 +16,12 @@
 
 /**
  * @fileoverview Externs for the $q service in Angular 1.2
+ * NOTE: Due to a JS compiler bug, any use of a templated class must occur after
+ * the class is defined. Please be careful with the ordering of the classes and
+ * functions.
  * @see https://docs.angularjs.org/api/ng/service/$q
  * @externs
  */
-
 
 /******************************************************************************
  * $q Service
@@ -31,28 +33,35 @@
 angular.$q;
 
 /**
- * @param {!Object.<!angular.$q.Promise>|!Array.<!angular.$q.Promise>} promises
- * @return {!angular.$q.Promise.<!Object|!Array>}
+ * @constructor
+ * @template T
+ * @extends {IThenable.<T>}
  */
-angular.$q.prototype.all = function(promises) {};
+angular.$q.Promise;
 
 /**
- * @return {!angular.$q.Deferred}
- */
-angular.$q.prototype.defer = function() {};
-
-/**
- * @param {*} reason
- * @return {!angular.$q.Promise}
- */
-angular.$q.prototype.reject = function(reason) {};
-
-/**
- * @param {RESULT} value
+ * @param {?(function(T):
+ *             (RESULT|IThenable.<RESULT>|Thenable))=} opt_onFulfilled
+ * @param {?(function(*): *)=} opt_onRejected
+ * @param {?(function(*): *)=} opt_notifyCallback
  * @return {!angular.$q.Promise.<RESULT>}
  * @template RESULT
+ * @override
  */
-angular.$q.prototype.when = function(value) {};
+angular.$q.Promise.prototype.then =
+    function(opt_onFulfilled, opt_onRejected, opt_notifyCallback) {};
+
+/**
+ * @param {?function(?)} callback
+ * @return {!angular.$q.Promise.<T>}
+ */
+angular.$q.Promise.prototype.catch = function(callback) {};
+
+/**
+ * @param {?function(?)} callback
+ * @return {!angular.$q.Promise.<T>}
+ */
+angular.$q.Promise.prototype.finally = function(callback) {};
 
 /**
  * @constructor
@@ -73,30 +82,25 @@ angular.$q.Deferred.prototype.notify = function(opt_value) {};
 angular.$q.Deferred.prototype.promise;
 
 /**
- * @constructor
- * @template T
+ * @param {!Object.<!angular.$q.Promise>|!Array.<!angular.$q.Promise>} promises
+ * @return {!angular.$q.Promise.<!Object|!Array>}
  */
-angular.$q.Promise;
+angular.$q.prototype.all = function(promises) {};
 
 /**
- * @param {?function(T): RESULT} successCallback
- * @param {?function(?)=} opt_errorCallback
- * @param {?function(?)=} opt_notifyCallback
+ * @return {!angular.$q.Deferred}
+ */
+angular.$q.prototype.defer = function() {};
+
+/**
+ * @param {*=} opt_reason
+ * @return {!angular.$q.Promise}
+ */
+angular.$q.prototype.reject = function(opt_reason) {};
+
+/**
+ * @param {RESULT} value
  * @return {!angular.$q.Promise.<RESULT>}
  * @template RESULT
  */
-angular.$q.Promise.prototype.then =
-    function(successCallback, opt_errorCallback, opt_notifyCallback) {};
-
-/**
- * @param {?function(?)} callback
- * @return {!angular.$q.Promise.<T>}
- */
-angular.$q.Promise.prototype.catch = function(callback) {};
-
-/**
- * @param {?function(?)} callback
- * @return {!angular.$q.Promise.<T>}
- */
-angular.$q.Promise.prototype.finally = function(callback) {};
-
+angular.$q.prototype.when = function(value) {};

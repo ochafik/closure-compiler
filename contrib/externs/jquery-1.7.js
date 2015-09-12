@@ -928,8 +928,9 @@ jQuery.prototype.fadeTo = function(duration, opacity, arg3, callback) {};
 jQuery.prototype.fadeToggle = function(duration, easing, callback) {};
 
 /**
- * @param {(jQuerySelector|function(number)|Element|jQuery)} arg1
+ * @param {(jQuerySelector|function(number,Element)|Element|jQuery)} arg1
  * @return {!jQuery}
+ * @see http://api.jquery.com/filter/
  */
 jQuery.prototype.filter = function(arg1) {};
 
@@ -1360,6 +1361,7 @@ jQuery.jqXHR.prototype.onreadystatechange = function (callback) {};
  * @param {function()=} failFilter
  * @param {function()=} progressFilter
  * @return {jQuery.jqXHR}
+ * @override
  */
 jQuery.jqXHR.prototype.pipe =
     function(doneFilter, failFilter, progressFilter) {};

@@ -21,13 +21,15 @@ package com.google.javascript.jscomp.newtypes;
  * @author blickly@google.com (Ben Lickly)
  * @author dimvar@google.com (Dimitris Vardoulakis)
  */
-public class NamespaceLit extends Namespace {
-  // collect namespaces during CNT
-  // careful w/ inferred vs declared props on namespaces (for otherprops)
+public final class NamespaceLit extends Namespace {
+  public NamespaceLit(String name) {
+    this.name = name;
+  }
 
-  public JSType toJSType() {
-    ObjectType objs = ObjectType.makeObjectType(
+  @Override
+  protected JSType computeJSType(JSTypes commonTypes) {
+    ObjectType obj = ObjectType.makeObjectType(
         null, otherProps, null, false, ObjectKind.UNRESTRICTED);
-    return withNamedTypes(objs);
+    return withNamedTypes(commonTypes, obj);
   }
 }

@@ -19,7 +19,6 @@ package com.google.javascript.jscomp.type;
 import static com.google.javascript.rhino.jstype.JSTypeNative.UNKNOWN_TYPE;
 
 import com.google.common.base.Function;
-import com.google.javascript.jscomp.CodingConvention;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 import com.google.javascript.rhino.jstype.FunctionType;
@@ -28,7 +27,7 @@ import com.google.javascript.rhino.jstype.JSType.TypePair;
 import com.google.javascript.rhino.jstype.JSTypeNative;
 import com.google.javascript.rhino.jstype.JSTypeRegistry;
 import com.google.javascript.rhino.jstype.ObjectType;
-import com.google.javascript.rhino.jstype.StaticSlot;
+import com.google.javascript.rhino.jstype.StaticTypedSlot;
 import com.google.javascript.rhino.jstype.UnionType;
 import com.google.javascript.rhino.jstype.Visitor;
 
@@ -38,7 +37,7 @@ import com.google.javascript.rhino.jstype.Visitor;
  * expects the parse tree inputs to be typed.
  *
  */
-public class SemanticReverseAbstractInterpreter
+public final class SemanticReverseAbstractInterpreter
     extends ChainableReverseAbstractInterpreter {
 
   /**
@@ -115,9 +114,8 @@ public class SemanticReverseAbstractInterpreter
   /**
    * Creates a semantic reverse abstract interpreter.
    */
-  public SemanticReverseAbstractInterpreter(CodingConvention convention,
-      JSTypeRegistry typeRegistry) {
-    super(convention, typeRegistry);
+  public SemanticReverseAbstractInterpreter(JSTypeRegistry typeRegistry) {
+    super(typeRegistry);
   }
 
   @Override
@@ -353,7 +351,7 @@ public class SemanticReverseAbstractInterpreter
       FlowScope blindScope, boolean outcome) {
     FlowScope leftScope = firstPreciserScopeKnowingConditionOutcome(
         left, blindScope, !outcome);
-    StaticSlot<JSType> leftVar = leftScope.findUniqueRefinedSlot(blindScope);
+    StaticTypedSlot<JSType> leftVar = leftScope.findUniqueRefinedSlot(blindScope);
     if (leftVar == null) {
       // If we did create a more precise scope, blindScope has a child and
       // it is frozen. We can't just throw it away to return it. So we
@@ -365,7 +363,7 @@ public class SemanticReverseAbstractInterpreter
         left, blindScope, outcome);
     rightScope = firstPreciserScopeKnowingConditionOutcome(
         right, rightScope, !outcome);
-    StaticSlot<JSType> rightVar = rightScope.findUniqueRefinedSlot(blindScope);
+    StaticTypedSlot<JSType> rightVar = rightScope.findUniqueRefinedSlot(blindScope);
     if (rightVar == null || !leftVar.getName().equals(rightVar.getName())) {
       return blindScope == rightScope ?
           blindScope : blindScope.createChildFlowScope();
@@ -492,7 +490,7 @@ public class SemanticReverseAbstractInterpreter
           JSType unknownType = typeRegistry.getNativeType(
               JSTypeNative.UNKNOWN_TYPE);
           informed.inferQualifiedSlot(
-              object, propertyQualifiedName, unknownType, unknownType);
+              object, propertyQualifiedName, unknownType, unknownType, false);
           return informed;
         }
       }

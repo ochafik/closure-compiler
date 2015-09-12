@@ -18,15 +18,13 @@ package com.google.javascript.jscomp;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import com.google.common.annotations.GwtIncompatible;
 import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
-import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
 import com.google.javascript.jscomp.SourceMap.LocationMapping;
 import com.google.protobuf.TextFormat;
@@ -43,15 +41,14 @@ import org.kohsuke.args4j.spi.Parameters;
 import org.kohsuke.args4j.spi.Setter;
 import org.kohsuke.args4j.spi.StringOptionHandler;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.lang.reflect.AnnotatedElement;
+import java.net.URI;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
@@ -61,8 +58,8 @@ import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -70,8 +67,6 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * CommandLineRunner translates flags into Java API calls on the Compiler.
@@ -111,6 +106,7 @@ import java.util.zip.ZipInputStream;
  *
  * @author bolinfest@google.com (Michael Bolin)
  */
+@GwtIncompatible("Unnecessary")
 public class CommandLineRunner extends
     AbstractCommandLineRunner<Compiler, CompilerOptions> {
 
@@ -132,7 +128,11 @@ public class CommandLineRunner extends
   // I don't really care about unchecked warnings in this class.
   @SuppressWarnings("unchecked")
   private static class Flags {
-    private static List<GuardLevel> guardLevels = new ArrayList<>();
+    // Some clients run a few copies of the compiler through CommandLineRunner
+    // on parallel threads (thankfully, with the same flags),
+    // so the access to |guardLevels| should be at least synchronized.
+    private static List<GuardLevel> guardLevels =
+        Collections.synchronizedList(new ArrayList<CommandLineRunner.GuardLevel>());
 
     @Option(name = "--help",
         hidden = true,
@@ -188,6 +188,10 @@ public class CommandLineRunner extends
             "js files that do not end in _test.js")
     private List<String> js = new ArrayList<>();
 
+    @Option(name = "--jszip",
+        usage = "The JavaScript zip filename. You may specify multiple.")
+    private List<String> jszip = new ArrayList<>();
+
     @Option(name = "--js_output_file",
         usage = "Primary output filename. If not specified, output is " +
         "written to stdout")
@@ -201,6 +205,8 @@ public class CommandLineRunner extends
         + "depends on. Modules must be listed in dependency order, and JS "
         + "source files must be listed in the corresponding order. Where "
         + "--module flags occur in relation to --js flags is unimportant. "
+        + "<num-js-files> may be set to 'auto' for the first module if it "
+        + "has no dependencies. "
         + "Provide the value 'auto' to trigger module creation from CommonJS"
         + "modules.")
     private List<String> module = new ArrayList<>();
@@ -291,7 +297,13 @@ public class CommandLineRunner extends
         hidden = true,
         usage = "Source map location mapping separated by a '|' " +
         "(i.e. filesystem-path|webserver-path)")
-    private List<String> sourceMapLocationMapping = Lists.newArrayList();
+    private List<String> sourceMapLocationMapping = new ArrayList<>();
+
+    @Option(name = "--source_map_input",
+        hidden = true,
+        usage = "Source map locations for input files, separated by a '|', " +
+        "(i.e. input-file-path|input-source-map)")
+    private List<String> sourceMapInputs = new ArrayList<>();
 
     // Used to define the flag, values are stored by the handler.
     @SuppressWarnings("unused")
@@ -299,7 +311,7 @@ public class CommandLineRunner extends
         hidden = true,
         handler = WarningGuardErrorOptionHandler.class,
         usage = "Make the named class of warnings an error. Options:" +
-        DiagnosticGroups.DIAGNOSTIC_GROUP_NAMES)
+        DiagnosticGroups.DIAGNOSTIC_GROUP_NAMES + ". '*' adds all supported.")
     private List<String> jscompError = new ArrayList<>();
 
     // Used to define the flag, values are stored by the handler.
@@ -308,7 +320,8 @@ public class CommandLineRunner extends
         hidden = true,
         handler = WarningGuardWarningOptionHandler.class,
         usage = "Make the named class of warnings a normal warning. " +
-        "Options:" + DiagnosticGroups.DIAGNOSTIC_GROUP_NAMES)
+        "Options:" + DiagnosticGroups.DIAGNOSTIC_GROUP_NAMES +
+        ". '*' adds all supported.")
     private List<String> jscompWarning = new ArrayList<>();
 
     // Used to define the flag, values are stored by the handler.
@@ -317,7 +330,7 @@ public class CommandLineRunner extends
         hidden = true,
         handler = WarningGuardOffOptionHandler.class,
         usage = "Turn off the named class of warnings. Options:" +
-        DiagnosticGroups.DIAGNOSTIC_GROUP_NAMES)
+        DiagnosticGroups.DIAGNOSTIC_GROUP_NAMES + ". '*' adds all supported.")
     private List<String> jscompOff = new ArrayList<>();
 
     @Option(name = "--define",
@@ -345,24 +358,23 @@ public class CommandLineRunner extends
     private String compilationLevel = "SIMPLE";
     private CompilationLevel compilationLevelParsed = null;
 
+    @Option(name = "--checks-only",
+        usage = "Don't generate output. Run checks, but no compiler passes.")
+    private boolean checksOnly = false;
+
     @Option(name = "--use_types_for_optimization",
         hidden = true,
-        usage = "Experimental: perform additional optimizations " +
-        "based on available information.  Inaccurate type annotations " +
+        handler = BooleanOptionHandler.class,
+        usage = "Enable or disable the optimizations " +
+        "based on available type information. Inaccurate type annotations " +
         "may result in incorrect results.")
-    private boolean useTypesForOptimization = false;
+    private boolean useTypesForOptimization = true;
 
     @Option(name = "--warning_level",
         aliases = {"-W"},
         usage = "Specifies the warning level to use. Options: " +
         "QUIET, DEFAULT, VERBOSE")
     private WarningLevel warningLevel = WarningLevel.DEFAULT;
-
-    @Option(name = "--use_only_custom_externs",
-        hidden = true,
-        handler = BooleanOptionHandler.class,
-        usage = "Specifies whether the default externs should be excluded")
-    private boolean useOnlyCustomExterns = false;
 
     @Option(name = "--debug",
         hidden = true,
@@ -376,6 +388,12 @@ public class CommandLineRunner extends
         usage = "Generates export code for those marked with @export")
     private boolean generateExports = false;
 
+    @Option(name = "--export_local_property_definitions",
+        hidden = true,
+        handler = BooleanOptionHandler.class,
+        usage = "Generates export code for local properties marked with @export")
+    private boolean exportLocalPropertyDefinitions = false;
+
     @Option(name = "--formatting",
         hidden = true,
         usage = "Specifies which formatting options, if any, should be "
@@ -388,21 +406,19 @@ public class CommandLineRunner extends
         usage = "Process CommonJS modules to a concatenable form.")
     private boolean processCommonJsModules = false;
 
-    @Option(name = "--rewrite_es6_modules",
-        hidden = true,
-        usage = "Rewrite ES6 modules to a concatenable form.")
-    private boolean rewriteEs6Modules = false;
+    @Option(
+      name = "--common_js_module_path_prefix",
+      hidden = true,
+      usage = "Path prefix to be removed from CommonJS module names."
+    )
+    private List<String> commonJsPathPrefix = new ArrayList<>();
 
-    @Option(name = "--transpile_only",
-        hidden = true,
-        usage = "Run ES6 to ES3 transpilation only, skip other passes.")
-    private boolean transpileOnly = false;
-
-    @Option(name = "--common_js_module_path_prefix",
-        hidden = true,
-        usage = "Path prefix to be removed from CommonJS module names.")
-    private String commonJsPathPrefix =
-        ProcessCommonJSModules.DEFAULT_FILENAME_PREFIX;
+    @Option(
+      name = "--js_module_root",
+      hidden = true,
+      usage = "Path prefixes to be removed from ES6 & CommonJS modules."
+    )
+    private List<String> moduleRoot = new ArrayList<>();
 
     @Option(name = "--common_js_entry_module",
         hidden = true,
@@ -419,7 +435,8 @@ public class CommandLineRunner extends
         hidden = true,
         handler = BooleanOptionHandler.class,
         usage = "Processes built-ins from the Closure library, such as "
-        + "goog.require(), goog.provide(), and goog.exportSymbol()")
+        + "goog.require(), goog.provide(), and goog.exportSymbol(). "
+        + "True by default.")
     private boolean processClosurePrimitives = true;
 
     @Option(name = "--manage_closure_dependencies",
@@ -466,6 +483,12 @@ public class CommandLineRunner extends
         + "annotated with @ngInject")
     private boolean angularPass = false;
 
+    @Option(name = "--polymer_pass",
+        hidden = true,
+        handler = BooleanOptionHandler.class,
+        usage = "Rewrite Polymer classes to be compiler-friendly.")
+    private boolean polymerPass = false;
+
     @Option(name = "--output_manifest",
         hidden = true,
         usage = "Prints out a list of all the files in the compilation. "
@@ -481,24 +504,21 @@ public class CommandLineRunner extends
         usage = "Prints out a JSON file of dependencies between modules.")
     private String outputModuleDependencies = "";
 
-    @Option(name = "--accept_const_keyword",
-        hidden = true,
-        usage = "Allows usage of const keyword.")
-    private boolean acceptConstKeyword = false;
-
     // TODO(tbreisacher): Remove the "(experimental)" for ES6 when it's stable enough.
     @Option(name = "--language_in",
         hidden = true,
         usage = "Sets what language spec that input sources conform. "
         + "Options: ECMASCRIPT3 (default), ECMASCRIPT5, ECMASCRIPT5_STRICT, "
-        + "ECMASCRIPT6 (experimental), ECMASCRIPT6_STRICT (experimental)")
+        + "ECMASCRIPT6 (experimental), ECMASCRIPT6_STRICT (experimental), "
+        + "ECMASCRIPT6_TYPED (experimental)")
     private String languageIn = "ECMASCRIPT3";
 
     @Option(name = "--language_out",
         hidden = true,
         usage = "Sets what language spec the output should conform to. "
         + " If omitted, defaults to the value of language_in. "
-        + "Options: ECMASCRIPT3, ECMASCRIPT5, ECMASCRIPT5_STRICT")
+        + "Options: ECMASCRIPT3, ECMASCRIPT5, ECMASCRIPT5_STRICT, "
+        + "ECMASCRIPT6_TYPED (experimental)")
     private String languageOut = "";
 
     @Option(name = "--version",
@@ -548,12 +568,26 @@ public class CommandLineRunner extends
         usage = "In development new type inference pass. DO NOT USE!")
     private boolean useNewTypeInference = false;
 
+    @Option(name = "--rename_prefix_namespace",
+        usage = "Specifies the name of an object that will be used to store all "
+        + "non-extern globals")
+    private String renamePrefixNamespace = null;
+
     @Option(name = "--conformance_configs",
+        hidden = true,
         usage = "A list of JS Conformance configurations in text protocol buffer format.")
     private List<String> conformanceConfigs = new ArrayList<>();
 
+    @Option(name = "--env",
+        hidden = true,
+        usage = "Determines the set of builtin externs to load. "
+            + "Options: BROWSER, CUSTOM. Defaults to BROWSER.")
+    private CompilerOptions.Environment environment =
+        CompilerOptions.Environment.BROWSER;
+
     @Argument
     private List<String> arguments = new ArrayList<>();
+    private final CmdLineParser parser;
 
     private static final Map<String, CompilationLevel> COMPILATION_LEVEL_MAP =
         ImmutableMap.of(
@@ -568,11 +602,14 @@ public class CommandLineRunner extends
             "ADVANCED_OPTIMIZATIONS",
             CompilationLevel.ADVANCED_OPTIMIZATIONS);
 
+    Flags() {
+      parser = new CmdLineParser(this);
+    }
+
     /**
      * Parse the given args list.
      */
     private void parse(List<String> args) throws CmdLineException {
-      CmdLineParser parser = new CmdLineParser(this);
       parser.parseArgument(args.toArray(new String[] {}));
 
       compilationLevelParsed =
@@ -585,14 +622,13 @@ public class CommandLineRunner extends
     }
 
     private void printUsage(PrintStream ps) {
-      CmdLineParser p = new CmdLineParser(this);
-      p.printUsage(new OutputStreamWriter(ps), null, OptionHandlerFilter.ALL);
+      parser.printUsage(new OutputStreamWriter(ps, UTF_8), null, OptionHandlerFilter.ALL);
       ps.flush();
     }
 
     private void printShortUsageAfterErrors(PrintStream ps) {
       ps.print("Sample usage: ");
-      ps.println((new CmdLineParser(this)).printExample(OptionHandlerFilter.PUBLIC, null));
+      ps.println(parser.printExample(OptionHandlerFilter.PUBLIC, null));
       ps.println("Run with --help for all options and details");
       ps.flush();
     }
@@ -617,88 +653,48 @@ public class CommandLineRunner extends
      * respect to {@code goog.provide()} and {@code goog.requires()}.
      */
     protected List<String> getJsFiles() throws CmdLineException, IOException {
-      final Set<String> allJsInputs = new LinkedHashSet<>();
       List<String> patterns = new ArrayList<>();
       patterns.addAll(js);
       patterns.addAll(arguments);
-      for (String pattern : patterns) {
-        if (!pattern.contains("*") && !pattern.startsWith("!")) {
-          File matchedFile = new File(pattern);
-          if (matchedFile.isDirectory()) {
-            matchPaths(new File(matchedFile, "**.js").toString(), allJsInputs);
-          } else {
-            allJsInputs.add(pattern);
-          }
-        } else {
-          matchPaths(pattern, allJsInputs);
-        }
-      }
-
+      List<String> allJsInputs = findJsFiles(patterns);
       if (!patterns.isEmpty() && allJsInputs.isEmpty()) {
-        throw new CmdLineException(new CmdLineParser(this), "No inputs matched");
+        throw new CmdLineException(parser, "No inputs matched");
       }
-
-      return new ArrayList<>(allJsInputs);
+      return allJsInputs;
     }
 
-    private void matchPaths(String pattern, final Set<String> allJsInputs)
-        throws IOException {
-      FileSystem fs = FileSystems.getDefault();
-      final boolean remove = pattern.indexOf('!') == 0;
-      if (remove) pattern = pattern.substring(1);
-
-      if (File.separator.equals("\\")) {
-        pattern = pattern.replace('\\', '/');
-      }
-
-      // Split the pattern into two pieces: the globbing part
-      // and the non-globbing prefix.
-      List<String> patternParts = Splitter.on('/').splitToList(pattern);
-      String prefix = ".";
-      for (int i = 0; i < patternParts.size(); i++) {
-        if (patternParts.get(i).contains("*")) {
-          if (i == 0) {
-            break;
-          } else {
-            prefix = Joiner.on("/").join(patternParts.subList(0, i));
-            pattern = Joiner.on("/").join(patternParts.subList(i, patternParts.size()));
-          }
-        }
-      }
-
-      final PathMatcher matcher = fs.getPathMatcher("glob:" + pattern);
-      java.nio.file.Files.walkFileTree(
-          fs.getPath(prefix), new SimpleFileVisitor<Path>() {
-            @Override public FileVisitResult visitFile(
-                Path p, BasicFileAttributes attrs) {
-              if (matcher.matches(p)) {
-                if (remove) {
-                  allJsInputs.remove(p.toString());
-                } else {
-                  allJsInputs.add(p.toString());
-                }
-              }
-              return FileVisitResult.CONTINUE;
-            }
-          });
-    }
-
-    @SuppressWarnings("deprecation")
     List<SourceMap.LocationMapping> getSourceMapLocationMappings() throws CmdLineException {
       ImmutableList.Builder<LocationMapping> locationMappings = ImmutableList.builder();
 
-      Splitter splitter = Splitter.on('|').limit(2);
-      for (String locationMapping : sourceMapLocationMapping) {
-        List<String> parts = splitter.splitToList(locationMapping);
-        if (parts.size() != 2) {
-          throw new CmdLineException(
-            "Bad value for --source_map_location_mapping: " +
-            ImmutableList.of(sourceMapLocationMapping));
-        }
-        locationMappings.add(new SourceMap.LocationMapping(parts.get(0), parts.get(1)));
+      ImmutableMap<String, String> split = splitPipeParts(
+          sourceMapLocationMapping, "--source_map_location_mapping");
+      for (Map.Entry<String, String> mapping : split.entrySet()) {
+        locationMappings.add(new SourceMap.LocationMapping(mapping.getKey(),
+            mapping.getValue()));
       }
 
       return locationMappings.build();
+    }
+
+    ImmutableMap<String, String> getSourceMapInputs() throws CmdLineException {
+      return splitPipeParts(sourceMapInputs, "--source_map_input");
+    }
+
+    private ImmutableMap<String, String> splitPipeParts(Iterable<String> input,
+        String flagName) throws CmdLineException {
+      ImmutableMap.Builder<String, String> result = new ImmutableMap.Builder<>();
+
+      Splitter splitter = Splitter.on('|').limit(2);
+      for (String inputSourceMap : input) {
+        List<String> parts = splitter.splitToList(inputSourceMap);
+        if (parts.size() != 2) {
+          throw new CmdLineException(parser, "Bad value for " + flagName +
+              " (duplicate key): " + input);
+        }
+        result.put(parts.get(0), parts.get(1));
+      }
+
+      return result.build();
     }
 
     // Our own option parser to be backwards-compatible.
@@ -991,6 +987,7 @@ public class CommandLineRunner extends
 
     List<String> jsFiles = null;
     List<LocationMapping> mappings = null;
+    ImmutableMap<String, String> sourceMapInputs = null;
     try {
       flags.parse(processedArgs);
 
@@ -1001,6 +998,7 @@ public class CommandLineRunner extends
 
       jsFiles = flags.getJsFiles();
       mappings = flags.getSourceMapLocationMappings();
+      sourceMapInputs = flags.getSourceMapInputs();
     } catch (CmdLineException e) {
       reportError(e.getMessage());
     } catch (IOException ioErr) {
@@ -1013,8 +1011,8 @@ public class CommandLineRunner extends
       if (flags.commonJsEntryModule == null) {
         reportError("Please specify --common_js_entry_module.");
       }
-      flags.closureEntryPoint = Lists.newArrayList(
-          ProcessCommonJSModules.toModuleName(flags.commonJsEntryModule));
+      flags.closureEntryPoint =
+          ImmutableList.of(ES6ModuleLoader.toModuleName(URI.create(flags.commonJsEntryModule)));
     }
 
     if (flags.outputWrapperFile != null && !flags.outputWrapperFile.isEmpty()) {
@@ -1055,6 +1053,14 @@ public class CommandLineRunner extends
         conv = new ClosureCodingConvention();
       }
 
+      // For backwards compatibility, allow both commonJsPathPrefix and jsModuleRoot.
+      List<String> moduleRoots = new ArrayList<>(flags.commonJsPathPrefix);
+      if (!flags.moduleRoot.isEmpty()) {
+        moduleRoots.addAll(flags.moduleRoot);
+      } else {
+        moduleRoots.add(ES6ModuleLoader.DEFAULT_FILENAME_PREFIX);
+      }
+
       getCommandLineConfig()
           .setPrintTree(flags.printTree)
           .setPrintAst(flags.printAst)
@@ -1063,6 +1069,7 @@ public class CommandLineRunner extends
           .setLoggingLevel(flags.loggingLevel)
           .setExterns(flags.externs)
           .setJs(jsFiles)
+          .setJsZip(flags.jszip)
           .setJsOutputFile(flags.jsOutputFile)
           .setModule(flags.module)
           .setVariableMapOutputFile(flags.variableMapOutputFile)
@@ -1076,6 +1083,7 @@ public class CommandLineRunner extends
           .setCreateSourceMap(flags.createSourceMap)
           .setSourceMapFormat(flags.sourceMapFormat)
           .setSourceMapLocationMappings(mappings)
+          .setSourceMapInputFiles(sourceMapInputs)
           .setWarningGuardSpec(Flags.getWarningGuardSpec())
           .setDefine(flags.define)
           .setCharset(flags.charset)
@@ -1084,13 +1092,10 @@ public class CommandLineRunner extends
           .setClosureEntryPoints(flags.closureEntryPoint)
           .setOutputManifest(ImmutableList.of(flags.outputManifest))
           .setOutputModuleDependencies(flags.outputModuleDependencies)
-          .setAcceptConstKeyword(flags.acceptConstKeyword)
           .setLanguageIn(flags.languageIn)
           .setLanguageOut(flags.languageOut)
           .setProcessCommonJSModules(flags.processCommonJsModules)
-          .setRewriteEs6Modules(flags.rewriteEs6Modules)
-          .setTranspileOnly(flags.transpileOnly)
-          .setCommonJSModulePathPrefix(flags.commonJsPathPrefix)
+          .setModuleRoots(moduleRoots)
           .setTransformAMDToCJSModules(flags.transformAmdModules)
           .setWarningsWhitelistFile(flags.warningsWhitelistFile)
           .setAngularPass(flags.angularPass)
@@ -1124,12 +1129,20 @@ public class CommandLineRunner extends
       level.setDebugOptionsForCompilationLevel(options);
     }
 
+    options.setEnvironment(flags.environment);
+
+    options.setChecksOnly(flags.checksOnly);
+
     if (flags.useTypesForOptimization) {
       level.setTypeBasedOptimizationOptions(options);
     }
 
     if (flags.generateExports) {
       options.setGenerateExports(flags.generateExports);
+    }
+
+    if (flags.exportLocalPropertyDefinitions) {
+      options.setExportLocalPropertyDefinitions(true);
     }
 
     WarningLevel wLevel = flags.warningLevel;
@@ -1144,6 +1157,10 @@ public class CommandLineRunner extends
         flags.processJqueryPrimitives;
 
     options.angularPass = flags.angularPass;
+
+    options.polymerPass = flags.polymerPass;
+
+    options.renamePrefixNamespace = flags.renamePrefixNamespace;
 
     if (!flags.translationsFile.isEmpty()) {
       try {
@@ -1177,15 +1194,15 @@ public class CommandLineRunner extends
   }
 
   @Override
-  protected List<SourceFile> createExterns() throws FlagUsageException,
-      IOException {
-    List<SourceFile> externs = super.createExterns();
-    if (flags.useOnlyCustomExterns || isInTestMode()) {
+  protected List<SourceFile> createExterns(CompilerOptions options)
+      throws FlagUsageException, IOException {
+    List<SourceFile> externs = super.createExterns(options);
+    if (isInTestMode()) {
       return externs;
     } else {
-      List<SourceFile> defaultExterns = getDefaultExterns();
-      defaultExterns.addAll(externs);
-      return defaultExterns;
+      List<SourceFile> builtinExterns = getBuiltinExterns(options);
+      builtinExterns.addAll(externs);
+      return builtinExterns;
     }
   }
 
@@ -1211,7 +1228,7 @@ public class CommandLineRunner extends
     ConformanceConfig.Builder builder = ConformanceConfig.newBuilder();
 
     // Looking for BOM.
-    if ((int)textProto.charAt(0) == UTF8_BOM_CODE) {
+    if (textProto.charAt(0) == UTF8_BOM_CODE) {
       // Stripping the BOM.
       textProto = textProto.substring(1);
     }
@@ -1224,104 +1241,74 @@ public class CommandLineRunner extends
     return builder.build();
   }
 
-  // The externs expected in externs.zip, in sorted order.
-  private static final List<String> DEFAULT_EXTERNS_NAMES = ImmutableList.of(
-    // JS externs
-    "es3.js",
-    "es5.js",
-    "es6.js",
-    "intl.js",
-
-    // Event APIs
-    "w3c_event.js",
-    "w3c_event3.js",
-    "gecko_event.js",
-    "ie_event.js",
-    "webkit_event.js",
-    "w3c_device_sensor_event.js",
-
-    // DOM apis
-    "w3c_dom1.js",
-    "w3c_dom2.js",
-    "w3c_dom3.js",
-    "gecko_dom.js",
-    "ie_dom.js",
-    "webkit_dom.js",
-
-    // CSS apis
-    "w3c_css.js",
-    "gecko_css.js",
-    "ie_css.js",
-    "webkit_css.js",
-
-    // Top-level namespaces
-    "google.js",
-
-    "chrome.js",
-
-    "deprecated.js",
-    "fileapi.js",
-    "flash.js",
-    "gecko_xml.js",
-    "html5.js",
-    "ie_vml.js",
-    "iphone.js",
-    "mediasource.js",
-    "v8.js",
-    "webstorage.js",
-    "w3c_anim_timing.js",
-    "w3c_css3d.js",
-    "w3c_elementtraversal.js",
-    "w3c_geolocation.js",
-    "w3c_indexeddb.js",
-    "w3c_navigation_timing.js",
-    "w3c_range.js",
-    "w3c_rtc.js",
-    "w3c_selectors.js",
-    "w3c_xml.js",
-    "window.js",
-    "webkit_notifications.js",
-    "webgl.js");
+  @Deprecated
+  public static List<SourceFile> getDefaultExterns() throws IOException {
+    return getBuiltinExterns(new CompilerOptions());
+  }
 
   /**
-   * @return a mutable list
-   * @throws IOException
+   * Returns all the JavaScript files from the set of patterns. The patterns support
+   * globs, such as '*.js' for all JS files in a directory and '**.js' for all JS files
+   * within the directory and sub-directories.
    */
-  public static List<SourceFile> getDefaultExterns() throws IOException {
-    InputStream input = CommandLineRunner.class.getResourceAsStream(
-        "/externs.zip");
-    if (input == null) {
-      // In some environments, the externs.zip is relative to this class.
-      input = CommandLineRunner.class.getResourceAsStream("externs.zip");
-    }
-    Preconditions.checkNotNull(input);
-
-    ZipInputStream zip = new ZipInputStream(input);
-    Map<String, SourceFile> externsMap = new HashMap<>();
-    for (ZipEntry entry = null; (entry = zip.getNextEntry()) != null; ) {
-      BufferedInputStream entryStream = new BufferedInputStream(
-          ByteStreams.limit(zip, entry.getSize()));
-      externsMap.put(entry.getName(),
-          SourceFile.fromInputStream(
-              // Give the files an odd prefix, so that they do not conflict
-              // with the user's files.
-              "externs.zip//" + entry.getName(),
-              entryStream,
-              UTF_8));
+  public static List<String> findJsFiles(Collection<String> patterns) throws IOException {
+    Set<String> allJsInputs = new LinkedHashSet<>();
+    for (String pattern : patterns) {
+      if (!pattern.contains("*") && !pattern.startsWith("!")) {
+        File matchedFile = new File(pattern);
+        if (matchedFile.isDirectory()) {
+          matchPaths(new File(matchedFile, "**.js").toString(), allJsInputs);
+        } else {
+          allJsInputs.add(pattern);
+        }
+      } else {
+        matchPaths(pattern, allJsInputs);
+      }
     }
 
-    Preconditions.checkState(
-        externsMap.keySet().equals(new HashSet<>(DEFAULT_EXTERNS_NAMES)),
-        "Externs zip must match our hard-coded list of externs.");
+    return new ArrayList<>(allJsInputs);
+  }
 
-    // Order matters, so the resources must be added to the result list
-    // in the expected order.
-    List<SourceFile> externs = new ArrayList<>();
-    for (String key : DEFAULT_EXTERNS_NAMES) {
-      externs.add(externsMap.get(key));
+  private static void matchPaths(String pattern, final Set<String> allJsInputs)
+      throws IOException {
+    FileSystem fs = FileSystems.getDefault();
+    final boolean remove = pattern.indexOf('!') == 0;
+    if (remove) pattern = pattern.substring(1);
+
+    if (File.separator.equals("\\")) {
+      pattern = pattern.replace('\\', '/');
     }
 
-    return externs;
+    // Split the pattern into two pieces: the globbing part
+    // and the non-globbing prefix.
+    List<String> patternParts = Splitter.on('/').splitToList(pattern);
+    String prefix = ".";
+    for (int i = 0; i < patternParts.size(); i++) {
+      if (patternParts.get(i).contains("*")) {
+        if (i == 0) {
+          break;
+        } else {
+          prefix = Joiner.on("/").join(patternParts.subList(0, i));
+          pattern = Joiner.on("/").join(patternParts.subList(i, patternParts.size()));
+        }
+      }
+    }
+
+    final PathMatcher matcher = fs.getPathMatcher("glob:" + pattern);
+    java.nio.file.Files.walkFileTree(
+        fs.getPath(prefix), new SimpleFileVisitor<Path>() {
+          @Override public FileVisitResult visitFile(
+              Path p, BasicFileAttributes attrs) {
+            if (matcher.matches(p)) {
+              if (remove) {
+                allJsInputs.remove(p.toString());
+              } else {
+                allJsInputs.add(p.toString());
+              }
+            }
+            return FileVisitResult.CONTINUE;
+          }
+        });
   }
 
   /**

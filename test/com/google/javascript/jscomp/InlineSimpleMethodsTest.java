@@ -16,16 +16,10 @@
 
 package com.google.javascript.jscomp;
 
-public class InlineSimpleMethodsTest extends CompilerTestCase {
+public final class InlineSimpleMethodsTest extends CompilerTestCase {
 
   public InlineSimpleMethodsTest() {
     super("", false);
-  }
-
-  @Override
-  protected void setUp() throws Exception {
-    super.setUp();
-    super.enableLineNumberCheck(true);
   }
 
   @Override

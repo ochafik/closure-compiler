@@ -28,6 +28,7 @@ import com.google.javascript.jscomp.graph.DiGraph.DiGraphEdge;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
+import com.google.javascript.rhino.jstype.FunctionType;
 import com.google.javascript.rhino.jstype.JSType;
 
 /**
@@ -35,7 +36,7 @@ import com.google.javascript.rhino.jstype.JSType;
  * but actually always returns {!SomeType}, i.e. never returns null.
  *
  */
-public class CheckNullableReturn implements HotSwapCompilerPass, NodeTraversal.Callback {
+public final class CheckNullableReturn implements HotSwapCompilerPass, NodeTraversal.Callback {
   final AbstractCompiler compiler;
 
   public static final DiagnosticType NULLABLE_RETURN =
@@ -109,13 +110,15 @@ public class CheckNullableReturn implements HotSwapCompilerPass, NodeTraversal.C
    * as returning a nullable type, other than {?}.
    */
   private static boolean isReturnTypeNullable(Node n) {
-    if (n == null) {
+    if (n == null || !n.isFunction()) {
       return false;
     }
-    if (!n.isFunction()) {
+    FunctionType functionType = n.getJSType().toMaybeFunctionType();
+    if (functionType == null) {
+      // If the JSDoc declares a non-function type on a function node, we still shouldn't crash.
       return false;
     }
-    JSType returnType = n.getJSType().toMaybeFunctionType().getReturnType();
+    JSType returnType = functionType.getReturnType();
     if (returnType == null
         || returnType.isUnknownType() || !returnType.isNullable()) {
       return false;
@@ -128,13 +131,9 @@ public class CheckNullableReturn implements HotSwapCompilerPass, NodeTraversal.C
    * @return True if the given ControlFlowGraph could return null.
    */
   public static boolean canReturnNull(ControlFlowGraph<Node> graph) {
-    CheckPathsBetweenNodes<Node, ControlFlowGraph.Branch> test =
-        new CheckPathsBetweenNodes<Node, ControlFlowGraph.Branch>(
-            graph,
-            graph.getEntry(),
-            graph.getImplicitReturn(),
-            NULLABLE_RETURN_PREDICATE,
-            Predicates.<DiGraphEdge<Node, ControlFlowGraph.Branch>>alwaysTrue());
+    CheckPathsBetweenNodes<Node, ControlFlowGraph.Branch> test = new CheckPathsBetweenNodes<>(graph,
+        graph.getEntry(), graph.getImplicitReturn(), NULLABLE_RETURN_PREDICATE,
+        Predicates.<DiGraphEdge<Node, ControlFlowGraph.Branch>>alwaysTrue());
 
     return test.somePathsSatisfyPredicate();
   }
@@ -159,11 +158,11 @@ public class CheckNullableReturn implements HotSwapCompilerPass, NodeTraversal.C
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, root, this);
+    NodeTraversal.traverseEs6(compiler, root, this);
   }
 
   @Override
   public void hotSwapScript(Node scriptRoot, Node originalRoot) {
-    NodeTraversal.traverse(compiler, originalRoot, this);
+    NodeTraversal.traverseEs6(compiler, originalRoot, this);
   }
 }

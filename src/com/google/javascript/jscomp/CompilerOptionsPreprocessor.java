@@ -15,6 +15,8 @@
  */
 package com.google.javascript.jscomp;
 
+import com.google.javascript.jscomp.parsing.parser.util.format.SimpleFormat;
+
 /**
  * Checks for combinations of options that are incompatible, i.e. will produce
  * incorrect code.
@@ -40,25 +42,31 @@ final class CompilerOptionsPreprocessor {
           + "remove_unused_prototype_properties to be turned on.");
     }
 
-    if (options.getLanguageIn() == options.getLanguageOut()) {
-      // No conversion.
-    } else if (!options.getLanguageIn().isEs6OrHigher()) {
+    if (!options.inlineFunctions
+        && options.maxFunctionSizeAfterInlining
+        != CompilerOptions.UNLIMITED_FUN_SIZE_AFTER_INLINING) {
       throw new InvalidOptionsException(
-          "Can only convert code from ES6 to a lower ECMAScript version."
-          + " Cannot convert from %s to %s.",
-          options.getLanguageIn(), options.getLanguageOut());
+          "max_function_size_after_inlining has no effect if inlining is"
+          + " disabled.");
     }
 
     if (options.useNewTypeInference) {
-      options.checkTypes = false;
-      options.inferTypes = false;
       options.checkMissingReturn = CheckLevel.OFF;
       options.checkGlobalThisLevel = CheckLevel.OFF;
-      // There is also overlap in the warnings of GlobalTypeInfo and VarCheck
-      // and VariableReferenceCheck.
-      // But VarCheck is always added in DefaultPassConfig, and
-      // VariableReferenceCheck finds warnings that we don't, so leave them on.
     }
+
+    if (options.jqueryPass && options.closurePass) {
+      throw new InvalidOptionsException(
+          "The jQuery pass and the Closure pass cannot both be enabled.");
+    }
+
+    if (options.removeUnusedPrototypePropertiesInExterns
+        && options.exportLocalPropertyDefinitions) {
+      throw new InvalidOptionsException(
+          "remove_unused_prototype_properties_in_externs "
+          + "and export_local_property_definitions cannot be used together.");
+    }
+
   }
 
   /**
@@ -66,7 +74,7 @@ final class CompilerOptionsPreprocessor {
    */
   public static class InvalidOptionsException extends RuntimeException {
     private InvalidOptionsException(String message, Object... args) {
-      super(String.format(message, args));
+      super(SimpleFormat.format(message, args));
     }
   }
 

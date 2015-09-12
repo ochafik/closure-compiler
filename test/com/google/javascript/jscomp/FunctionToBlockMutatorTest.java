@@ -28,7 +28,7 @@ import junit.framework.TestCase;
 /**
  * @author johnlenz@google.com (John Lenz)
  */
-public class FunctionToBlockMutatorTest extends TestCase {
+public final class FunctionToBlockMutatorTest extends TestCase {
 
   public void testMutateNoReturnWithoutResultAssignment() {
     helperMutate(
@@ -242,7 +242,7 @@ public class FunctionToBlockMutatorTest extends TestCase {
 
     compiler.resetUniqueNameId();
     TestCallback test = new TestCallback(fnName, tester);
-    NodeTraversal.traverse(compiler, tree, test);
+    NodeTraversal.traverseEs6(compiler, tree, test);
   }
 
   interface Method {

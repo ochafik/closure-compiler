@@ -16,11 +16,14 @@
 
 package com.google.javascript.refactoring;
 
+import static com.google.javascript.refactoring.testing.SuggestedFixes.assertChanges;
+import static com.google.javascript.refactoring.testing.SuggestedFixes.assertReplacement;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
+import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.SetMultimap;
 import com.google.javascript.jscomp.Compiler;
@@ -32,8 +35,6 @@ import com.google.javascript.rhino.Node;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
-
-import java.util.Set;
 
 /**
  * Unit tests for JsFlume {@link SuggestedFix}.
@@ -69,6 +70,63 @@ public class SuggestedFixTest {
         .delete(root.getFirstChild())
         .build();
     CodeReplacement replacement = new CodeReplacement(0, input.length(), "");
+    assertReplacement(fix, replacement);
+  }
+
+  @Test
+  public void testDelete_spaceBeforeNode() {
+    String before = "var foo = new Bar();";
+    String after = "\n\nvar baz = new Baz();";
+    String input = before + after;
+    Compiler compiler = getCompiler(input);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .delete(root.getLastChild())
+        .build();
+    CodeReplacement replacement = new CodeReplacement(before.length(), after.length(), "");
+    assertReplacement(fix, replacement);
+  }
+
+  @Test
+  public void testDelete_dontDeleteSpaceBeforeNode() {
+    String before = "var foo = new Bar();\n\n";
+    String after = "var baz = new Baz();";
+    String input = before + after;
+    Compiler compiler = getCompiler(input);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .deleteWithoutRemovingSurroundWhitespace(root.getLastChild())
+        .build();
+    CodeReplacement replacement = new CodeReplacement(before.length(), after.length(), "");
+    assertReplacement(fix, replacement);
+  }
+
+  @Test
+  public void testDelete_multipleVarDeclaration() {
+    String input = "var foo = 3, bar, baz;";
+    Compiler compiler = getCompiler(input);
+    Node root = compileToScriptRoot(compiler);
+
+    // Delete the 1st variable on the line. Make sure the deletion includes the assignment and the
+    // trailing comma.
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .delete(root.getFirstChild().getFirstChild())
+        .build();
+    CodeReplacement replacement = new CodeReplacement(4, "foo = 3, ".length(), "");
+    assertReplacement(fix, replacement);
+
+    // Delete the 2nd variable.
+    fix = new SuggestedFix.Builder()
+        .delete(root.getFirstChild().getFirstChild().getNext())
+        .build();
+    replacement = new CodeReplacement(13, "bar, ".length(), "");
+    assertReplacement(fix, replacement);
+
+    // Delete the last variable. Make sure it removes the leading comma.
+    fix = new SuggestedFix.Builder()
+        .delete(root.getFirstChild().getLastChild())
+        .build();
+    replacement = new CodeReplacement(16, ", baz".length(), "");
     assertReplacement(fix, replacement);
   }
 
@@ -137,9 +195,39 @@ public class SuggestedFixTest {
   }
 
   @Test
+  public void testRenameTaggedTemplate_justFunctionName() {
+    String prefix = "prt.";
+    String fnName = "oldTaggedTemp";
+    String newFnName = "newTaggedTemp";
+    String input = prefix + fnName + "`${Foo}Bar`;";
+    Compiler compiler = getCompiler(input);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .rename(root.getFirstChild().getFirstChild(), newFnName)
+        .build();
+    CodeReplacement replacement = new CodeReplacement(prefix.length(),
+        fnName.length(), newFnName);
+    assertReplacement(fix, replacement);
+  }
+
+  @Test
+  public void testRenameTaggedTemplate_entireName() {
+    String fnName = "goog.dom.classes.oldTaggedTemp";
+    String newFnName = "goog.dom.classesList.newTaggedTemp";
+    String input = fnName + "`${Foo}Bar`;";
+    Compiler compiler = getCompiler(input);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .rename(root.getFirstChild().getFirstChild(), newFnName, true)
+        .build();
+    CodeReplacement replacement = new CodeReplacement(0, fnName.length(), newFnName);
+    assertReplacement(fix, replacement);
+  }
+
+  @Test
   public void testReplace() {
     String before = "var someRandomCode = {};\n/** some comment */\n";
-    String after = "goog.foo()";
+    String after = "goog.foo();";
     Compiler compiler = getCompiler(before + after);
     Node root = compileToScriptRoot(compiler);
     Node newNode = IR.exprResult(IR.call(
@@ -149,7 +237,43 @@ public class SuggestedFixTest {
         .replace(root.getLastChild().getFirstChild(), newNode, compiler)
         .build();
     CodeReplacement replacement = new CodeReplacement(
-        before.length(), after.length(), "goog2.get('service');\n");
+        before.length(), after.length(), "goog2.get('service');");
+    assertReplacement(fix, replacement);
+  }
+
+  @Test
+  public void testReplace_functionArgument() {
+    String before = ""
+        + "var MyClass = function() {};\n"
+        + "MyClass.prototype.foo = function() {};\n"
+        + "MyClass.prototype.bar = function() {};\n"
+        + "var clazz = new MyClass();\n";
+    String after = "alert(clazz.foo());";
+    Compiler compiler = getCompiler(before + after);
+    Node root = compileToScriptRoot(compiler);
+    Node newNode = IR.call(IR.getprop(IR.name("clazz"), IR.string("bar")));
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .replace(root.getLastChild().getFirstChild().getLastChild(), newNode, compiler)
+        .build();
+    CodeReplacement replacement = new CodeReplacement(
+        before.length() + "alert(".length(), "clazz.foo()".length(), "clazz.bar()");
+    assertReplacement(fix, replacement);
+  }
+
+  @Test
+  public void testReplace_leftHandSideAssignment() {
+    String before = "var MyClass = function() {};\n";
+    String after = "MyClass.prototype.foo = function() {};\n";
+    Compiler compiler = getCompiler(before + after);
+    Node root = compileToScriptRoot(compiler);
+    Node newNode = IR.getprop(
+        IR.getprop(IR.name("MyClass"), IR.string("prototype")),
+        IR.string("bar"));
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .replace(root.getLastChild().getFirstChild().getFirstChild(), newNode, compiler)
+        .build();
+    CodeReplacement replacement = new CodeReplacement(
+        before.length(), "MyClass.prototype.foo".length(), "MyClass.prototype.bar");
     assertReplacement(fix, replacement);
   }
 
@@ -170,6 +294,7 @@ public class SuggestedFixTest {
   @Test
   public void testRemoveCast() {
     String input = "var x = /** @type {string} */ (y);";
+    String expectedCode = "var x = y;";
     Compiler compiler = getCompiler(input);
     Node root = compileToScriptRoot(compiler);
     Node castNode = root.getFirstChild().getFirstChild().getFirstChild();
@@ -178,9 +303,52 @@ public class SuggestedFixTest {
     SuggestedFix fix = new SuggestedFix.Builder()
         .removeCast(castNode, compiler)
         .build();
-    CodeReplacement replacement = new CodeReplacement(
-        "var x = ".length(), "/** @type {string} */ (y)".length(), "y");
-    assertReplacement(fix, replacement);
+    assertChanges(fix, "", input, expectedCode);
+  }
+
+  @Test
+  public void testRemoveCast_complexStatement() {
+    String input = ""
+        + "var x = /** @type {string} */ (function() {\n"
+        + "  // Inline comment that should be preserved.\n"
+        + "  var blah = bleh;\n"
+        + "});";
+    String expectedCode = ""
+        + "var x = function() {\n"
+        + "  // Inline comment that should be preserved.\n"
+        + "  var blah = bleh;\n"
+        + "};";
+    Compiler compiler = getCompiler(input);
+    Node root = compileToScriptRoot(compiler);
+    Node castNode = root.getFirstChild().getFirstChild().getFirstChild();
+    assertTrue(castNode.isCast());
+
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .removeCast(castNode, compiler)
+        .build();
+    assertChanges(fix, "", input, expectedCode);
+  }
+
+  @Test
+  public void testRemoveCast_return() {
+    String input = Joiner.on('\n').join(
+        "function f() {",
+        "  return /** @type {string} */ (",
+        "      'I am obviously a string. Why are you casting me?');",
+        "}");
+    String expectedCode = Joiner.on('\n').join(
+        "function f() {",
+        "  return 'I am obviously a string. Why are you casting me?';",
+        "}");
+    Compiler compiler = getCompiler(input);
+    Node root = compileToScriptRoot(compiler);
+    Node castNode = root.getFirstChild().getLastChild().getFirstChild().getLastChild();
+    assertTrue(castNode.isCast());
+
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .removeCast(castNode, compiler)
+        .build();
+    assertChanges(fix, "", input, expectedCode);
   }
 
   @Test
@@ -277,6 +445,147 @@ public class SuggestedFixTest {
         .build();
     CodeReplacement replacement = new CodeReplacement(before.length(), 0, ", baz");
     assertReplacement(fix, replacement);
+  }
+
+  @Test
+  public void testInsertArguments_castInArguments() {
+    String originalCode = "goog.dom.classes.add(foo, /** @type {String} */ (bar));";
+    String expectedCode = "goog.dom.classes.add(foo, baz, /** @type {String} */ (bar));";
+    Compiler compiler = getCompiler(originalCode);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .insertArguments(root.getFirstChild().getFirstChild(), 1, "baz")
+        .build();
+    assertChanges(fix, "", originalCode, expectedCode);
+  }
+
+  @Test
+  public void testDeleteArgumentFirst() {
+    String originalCode = "f(a, b, c);";
+    String expectedCode = "f(b, c);";
+
+    Compiler compiler = getCompiler(originalCode);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .deleteArgument(root.getFirstChild().getFirstChild(), 0)
+        .build();
+
+    assertChanges(fix, "", originalCode, expectedCode);
+  }
+
+  @Test
+  public void testDeleteArgumentMiddle() {
+    String originalCode = "f(a, b, c);";
+    String expectedCode = "f(a, c);";
+
+    Compiler compiler = getCompiler(originalCode);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .deleteArgument(root.getFirstChild().getFirstChild(), 1)
+        .build();
+
+    assertChanges(fix, "", originalCode, expectedCode);
+  }
+
+  @Test
+  public void testDeleteArgumentLast() {
+    String originalCode = "f(a, b, c);";
+    String expectedCode = "f(a, b);";
+
+    Compiler compiler = getCompiler(originalCode);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .deleteArgument(root.getFirstChild().getFirstChild(), 2)
+        .build();
+
+    assertChanges(fix, "", originalCode, expectedCode);
+  }
+
+  @Test
+  public void testDeleteFirstArgumentWithPrefixComment() {
+    String originalCode = "f(/** @type {number} */ (a), b, c);";
+    String expectedCode = "f(b, c);";
+
+    Compiler compiler = getCompiler(originalCode);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .deleteArgument(root.getFirstChild().getFirstChild(), 0)
+        .build();
+
+    assertChanges(fix, "", originalCode, expectedCode);
+  }
+
+  @Test
+  public void testDeleteFirstArgumentWithPostfixComment() {
+    String originalCode = "f(a /** foo */, b, c);";
+    String expectedCode = "f(b, c);";
+
+    Compiler compiler = getCompiler(originalCode);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .deleteArgument(root.getFirstChild().getFirstChild(), 0)
+        .build();
+
+    assertChanges(fix, "", originalCode, expectedCode);
+  }
+
+  @Test
+  public void testDeleteArgumentWithPrefixComment() {
+    String originalCode = "f(a, /** @type {number} */ (b), c);";
+    String expectedCode = "f(a, c);";
+
+    Compiler compiler = getCompiler(originalCode);
+    Node root = compileToScriptRoot(compiler);
+    SuggestedFix fix = new SuggestedFix.Builder()
+        .deleteArgument(root.getFirstChild().getFirstChild(), 1)
+        .build();
+
+    assertChanges(fix, "", originalCode, expectedCode);
+  }
+
+  @Test
+  public void testDeleteArgumentIndexTooLarge() {
+    String fnCall = "f(a, b, c);";
+    Compiler compiler = getCompiler(fnCall);
+    Node root = compileToScriptRoot(compiler);
+    try {
+      new SuggestedFix.Builder()
+          .deleteArgument(root.getFirstChild().getFirstChild(), 3)
+          .build();
+      fail("An exception should have been thrown for an invalid index");
+    } catch (IllegalArgumentException e) {
+      // Success, an exception was thrown for an invalid index.
+    }
+  }
+
+  @Test
+  public void testDeleteArgumentIndexTooSmall() {
+    String fnCall = "f(a);";
+    Compiler compiler = getCompiler(fnCall);
+    Node root = compileToScriptRoot(compiler);
+    try {
+      new SuggestedFix.Builder()
+          .deleteArgument(root.getFirstChild().getFirstChild(), -1)
+          .build();
+      fail("An exception should have been thrown for an invalid index");
+    } catch (IllegalArgumentException e) {
+      // Success, an exception was thrown for an invalid index.
+    }
+  }
+
+  @Test
+  public void testDeleteArgumentWithNoArguments() {
+    String fnCall = "f();";
+    Compiler compiler = getCompiler(fnCall);
+    Node root = compileToScriptRoot(compiler);
+    try {
+      new SuggestedFix.Builder()
+          .deleteArgument(root.getFirstChild().getFirstChild(), 0)
+          .build();
+      fail("An exception should have been thrown for an invalid index");
+    } catch (IllegalStateException e) {
+      // Success, an exception was thrown for an invalid index.
+    }
   }
 
   @Test
@@ -386,18 +695,6 @@ public class SuggestedFixTest {
         .build();
     SetMultimap<String, CodeReplacement> replacementMap = fix.getReplacements();
     assertEquals(0, replacementMap.size());
-  }
-
-  private void assertReplacement(SuggestedFix fix, CodeReplacement expectedReplacement) {
-    assertReplacements(fix, ImmutableSet.of(expectedReplacement));
-  }
-
-  private void assertReplacements(SuggestedFix fix, Set<CodeReplacement> expectedReplacements) {
-    SetMultimap<String, CodeReplacement> replacementMap = fix.getReplacements();
-    assertEquals(1, replacementMap.size());
-    Set<CodeReplacement> replacements = replacementMap.get("test");
-    assertEquals(expectedReplacements.size(), replacements.size());
-    assertEquals(expectedReplacements, replacements);
   }
 
   /**

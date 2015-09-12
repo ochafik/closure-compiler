@@ -44,9 +44,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 
 import java.io.Serializable;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -153,7 +153,7 @@ class PropertyMap implements Serializable {
     if (primaryParent == null) {
       return this.properties.size();
     }
-    Set<String> props = Sets.newHashSet();
+    Set<String> props = new HashSet<>();
     collectPropertyNames(props);
     return props.size();
   }
@@ -171,9 +171,7 @@ class PropertyMap implements Serializable {
   }
 
   void collectPropertyNames(Set<String> props) {
-    for (String prop : properties.keySet()) {
-      props.add(prop);
-    }
+    props.addAll(properties.keySet());
     PropertyMap primaryParent = getPrimaryParent();
     if (primaryParent != null) {
       primaryParent.collectPropertyNames(props);

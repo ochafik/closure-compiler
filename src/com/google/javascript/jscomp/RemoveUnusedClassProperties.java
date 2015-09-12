@@ -17,22 +17,22 @@
 package com.google.javascript.jscomp;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
-import com.google.javascript.rhino.jstype.JSType;
+import com.google.javascript.rhino.TypeI;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
  * This pass looks for properties that are never read and removes them.
  * These can be properties created using "this", or static properties of
- * constructors or interfaces. Explicitly ignored is the possibility that 
- * these properties may be indirectly referenced using "for-in" or 
- * "Object.keys".  This is the same assumption used with 
+ * constructors or interfaces. Explicitly ignored is the possibility that
+ * these properties may be indirectly referenced using "for-in" or
+ * "Object.keys".  This is the same assumption used with
  * RemoveUnusedPrototypeProperties but is slightly wider in scope.
  *
  * @author johnlenz@google.com (John Lenz)
@@ -40,8 +40,8 @@ import java.util.Set;
 class RemoveUnusedClassProperties
     implements CompilerPass, NodeTraversal.Callback {
   private final AbstractCompiler compiler;
-  private Set<String> used = Sets.newHashSet();
-  private List<Node> candidates = Lists.newArrayList();
+  private Set<String> used = new HashSet<>();
+  private List<Node> candidates = new ArrayList<>();
 
   private final boolean removeUnusedConstructorProperties;
 
@@ -54,15 +54,17 @@ class RemoveUnusedClassProperties
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, root, this);
+    NodeTraversal.traverseEs6(compiler, root, this);
     removeUnused();
   }
 
   private void removeUnused() {
     for (Node n : candidates) {
       Preconditions.checkState(n.isGetProp());
-      if (!used.contains(n.getLastChild().getString())) {
+      String propName = n.getLastChild().getString();
+      if (!used.contains(propName)) {
         Node parent = n.getParent();
+        Node replacement;
         if (NodeUtil.isAssignmentOp(parent)) {
           Node assign = parent;
           Preconditions.checkState(assign != null
@@ -70,14 +72,29 @@ class RemoveUnusedClassProperties
               && assign.getFirstChild() == n);
           compiler.reportChangeToEnclosingScope(assign);
           // 'this.x = y' to 'y'
-          assign.getParent().replaceChild(assign,
-              assign.getLastChild().detachFromParent());
+          replacement = assign.getLastChild().detachFromParent();
         } else if (parent.isInc() || parent.isDec()) {
           compiler.reportChangeToEnclosingScope(parent);
-          parent.getParent().replaceChild(parent, IR.number(0));
+          replacement = IR.number(0).srcref(parent);
         } else {
           throw new IllegalStateException("unexpected: " + parent);
         }
+
+        // If the property expression is complex preserve that part of the
+        // expression.
+        if (!n.isQualifiedName()) {
+          Node preserved = n.getFirstChild();
+          while (preserved.isGetProp()) {
+            preserved = preserved.getFirstChild();
+          }
+          replacement = IR.comma(
+              preserved.detachFromParent(),
+              replacement)
+              .srcref(parent);
+        }
+
+        compiler.reportChangeToEnclosingScope(parent);
+        parent.getParent().replaceChild(parent, replacement);
       }
     }
   }
@@ -138,7 +155,7 @@ class RemoveUnusedClassProperties
   }
 
   private boolean isConstructor(Node n) {
-    JSType type = n.getJSType();
+    TypeI type = n.getTypeI();
     return type != null && (type.isConstructor() || type.isInterface());
   }
 

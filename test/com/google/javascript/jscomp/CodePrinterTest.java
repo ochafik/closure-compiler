@@ -17,155 +17,16 @@
 package com.google.javascript.jscomp;
 
 import com.google.common.base.Joiner;
-import com.google.common.collect.Lists;
 import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 import com.google.javascript.rhino.IR;
-import com.google.javascript.rhino.InputId;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
-import junit.framework.TestCase;
-
+import java.util.ArrayList;
 import java.util.List;
 
 
-public class CodePrinterTest extends TestCase {
-  // If this is set, ignore parse warnings and only fail the test
-  // for parse errors.
-  private boolean allowWarnings = false;
-
-  private boolean trustedStrings = true;
-  private boolean preserveTypeAnnotations = false;
-  private Compiler lastCompiler = null;
-  private LanguageMode languageMode = LanguageMode.ECMASCRIPT5;
-
-  @Override public void setUp() {
-    allowWarnings = false;
-    preserveTypeAnnotations = false;
-    trustedStrings = true;
-    lastCompiler = null;
-    languageMode = LanguageMode.ECMASCRIPT5;
-  }
-
-  Node parse(String js) {
-    return parse(js, false);
-  }
-
-  Node parse(String js, boolean checkTypes) {
-    Compiler compiler = new Compiler();
-    lastCompiler = compiler;
-    CompilerOptions options = new CompilerOptions();
-    options.setTrustedStrings(trustedStrings);
-    options.preserveTypeAnnotations = preserveTypeAnnotations;
-
-    // Allow getters and setters.
-    options.setLanguageIn(languageMode);
-    compiler.initOptions(options);
-    Node n = compiler.parseTestCode(js);
-
-    if (checkTypes) {
-      DefaultPassConfig passConfig = new DefaultPassConfig(null);
-      CompilerPass typeResolver = passConfig.resolveTypes.create(compiler);
-      Node externs = new Node(Token.SCRIPT);
-      externs.setInputId(new InputId("externs"));
-      Node externAndJsRoot = new Node(Token.BLOCK, externs, n);
-      externAndJsRoot.setIsSyntheticBlock(true);
-      typeResolver.process(externs, n);
-      CompilerPass inferTypes = passConfig.inferTypes.create(compiler);
-      inferTypes.process(externs, n);
-    }
-
-    checkUnexpectedErrorsOrWarnings(compiler, 0);
-    return n;
-  }
-
-  private void checkUnexpectedErrorsOrWarnings(
-      Compiler compiler, int expected) {
-    int actual = compiler.getErrors().length;
-    if (!allowWarnings) {
-      actual += compiler.getWarnings().length;
-    }
-
-    if (actual != expected) {
-      String msg = "";
-      for (JSError err : compiler.getErrors()) {
-        msg += "Error:" + err + "\n";
-      }
-      if (!allowWarnings) {
-        for (JSError err : compiler.getWarnings()) {
-          msg += "Warning:" + err + "\n";
-        }
-      }
-      assertEquals("Unexpected warnings or errors.\n " + msg, expected, actual);
-    }
-  }
-
-  String parsePrint(String js, CompilerOptions options) {
-    return new CodePrinter.Builder(parse(js)).setCompilerOptions(options).build();
-  }
-
-  CompilerOptions newCompilerOptions(boolean prettyprint, int lineThreshold) {
-    CompilerOptions options = new CompilerOptions();
-    options.setTrustedStrings(trustedStrings);
-    options.preserveTypeAnnotations = preserveTypeAnnotations;
-    options.setLanguageOut(languageMode);
-    options.setPrettyPrint(prettyprint);
-    options.setLineLengthThreshold(lineThreshold);
-    return options;
-  }
-
-  CompilerOptions newCompilerOptions(boolean prettyprint, int lineThreshold, boolean lineBreak) {
-    CompilerOptions options = newCompilerOptions(prettyprint, lineThreshold);
-    options.setLineBreak(lineBreak);
-    return options;
-  }
-
-  String parsePrint(String js, boolean prettyprint, int lineThreshold) {
-    return parsePrint(js, newCompilerOptions(prettyprint, lineThreshold));
-  }
-
-  String parsePrint(String js, boolean prettyprint, boolean lineBreak, int lineThreshold) {
-    return parsePrint(js, newCompilerOptions(prettyprint, lineThreshold, lineBreak));
-  }
-
-  String parsePrint(String js, boolean prettyprint, boolean lineBreak,
-      boolean preferLineBreakAtEof, int lineThreshold) {
-    CompilerOptions options = newCompilerOptions(prettyprint, lineThreshold, lineBreak);
-    options.setPreferLineBreakAtEndOfFile(preferLineBreakAtEof);
-    return parsePrint(js, options);
-  }
-
-  String parsePrint(String js, boolean prettyprint, boolean lineBreak, int lineThreshold,
-      boolean outputTypes) {
-    return new CodePrinter.Builder(parse(js, true))
-        .setCompilerOptions(newCompilerOptions(prettyprint, lineThreshold, lineBreak))
-        .setOutputTypes(outputTypes)
-        .setTypeRegistry(lastCompiler.getTypeRegistry())
-        .build();
-  }
-
-  String parsePrint(String js, boolean prettyprint, boolean lineBreak,
-                    int lineThreshold, boolean outputTypes,
-                    boolean tagAsStrict) {
-    return new CodePrinter.Builder(parse(js, true))
-        .setCompilerOptions(newCompilerOptions(prettyprint, lineThreshold, lineBreak))
-        .setOutputTypes(outputTypes)
-        .setTypeRegistry(lastCompiler.getTypeRegistry())
-        .setTagAsStrict(tagAsStrict)
-        .build();
-  }
-
-
-  String printNode(Node n) {
-    CompilerOptions options = new CompilerOptions();
-    options.setLineLengthThreshold(CodePrinter.DEFAULT_LINE_LENGTH_THRESHOLD);
-    options.setLanguageOut(languageMode);
-    return new CodePrinter.Builder(n).setCompilerOptions(options).build();
-  }
-
-  void assertPrintNode(String expectedJs, Node ast) {
-    assertEquals(expectedJs, printNode(ast));
-  }
+public final class CodePrinterTest extends CodePrinterTestBase {
 
   public void testPrint() {
     assertPrint("10 + a + b", "10+a+b");
@@ -464,29 +325,29 @@ public class CodePrinterTest extends TestCase {
 
   public void testPrintObjectPatternAssign() {
     languageMode = LanguageMode.ECMASCRIPT6;
-    assertPrintSame("({a})=foo()");
-    assertPrintSame("({a,b})=foo()");
-    assertPrintSame("({a:a,b:b})=foo()");
+    assertPrintSame("({a}=foo())");
+    assertPrintSame("({a,b}=foo())");
+    assertPrintSame("({a:a,b:b}=foo())");
   }
 
   public void testPrintNestedObjectPattern() {
     languageMode = LanguageMode.ECMASCRIPT6;
-    assertPrintSame("({a:{b,c}})=foo()");
-    assertPrintSame("({a:{b:{c:{d}}}})=foo()");
+    assertPrintSame("({a:{b,c}}=foo())");
+    assertPrintSame("({a:{b:{c:{d}}}}=foo())");
   }
 
   public void testPrintObjectPatternInitializer() {
     languageMode = LanguageMode.ECMASCRIPT6;
-    assertPrintSame("({a=1})=foo()");
-    assertPrintSame("({a:{b=2}})=foo()");
-    assertPrintSame("({a:b=2})=foo()");
-    assertPrintSame("({a,b:{c=2}})=foo()");
-    assertPrintSame("({a:{b=2},c})=foo()");
+    assertPrintSame("({a=1}=foo())");
+    assertPrintSame("({a:{b=2}}=foo())");
+    assertPrintSame("({a:b=2}=foo())");
+    assertPrintSame("({a,b:{c=2}}=foo())");
+    assertPrintSame("({a:{b=2},c}=foo())");
   }
 
   public void testPrintMixedDestructuring() {
     languageMode = LanguageMode.ECMASCRIPT6;
-    assertPrintSame("({a:[b,c]})=foo()");
+    assertPrintSame("({a:[b,c]}=foo())");
     assertPrintSame("[a,{b,c}]=foo()");
   }
 
@@ -500,6 +361,52 @@ public class CodePrinterTest extends TestCase {
     assertPrintSame("function f({a,b}=c()){}");
     assertPrintSame("function f([a,{b,c}]){}");
     assertPrintSame("function f({a,b:[c,d]}){}");
+  }
+
+  public void testDestructuringForInLoops() {
+    languageMode = LanguageMode.ECMASCRIPT6;
+
+    assertPrintSame("for({a}in b)c");
+    assertPrintSame("for(var {a}in b)c");
+    assertPrintSame("for(let {a}in b)c");
+    assertPrintSame("for(const {a}in b)c");
+
+    assertPrintSame("for({a:b}in c)d");
+    assertPrintSame("for(var {a:b}in c)d");
+    assertPrintSame("for(let {a:b}in c)d");
+    assertPrintSame("for(const {a:b}in c)d");
+
+    assertPrintSame("for([a]in b)c");
+    assertPrintSame("for(var [a]in b)c");
+    assertPrintSame("for(let [a]in b)c");
+    assertPrintSame("for(const [a]in b)c");
+  }
+
+  public void testDestructuringForOfLoops1() {
+    languageMode = LanguageMode.ECMASCRIPT6;
+
+    assertPrintSame("for({a}of b)c");
+    assertPrintSame("for(var {a}of b)c");
+    assertPrintSame("for(let {a}of b)c");
+    assertPrintSame("for(const {a}of b)c");
+
+    assertPrintSame("for({a:b}of c)d");
+    assertPrintSame("for(var {a:b}of c)d");
+    assertPrintSame("for(let {a:b}of c)d");
+    assertPrintSame("for(const {a:b}of c)d");
+
+    assertPrintSame("for([a]of b)c");
+    assertPrintSame("for(var [a]of b)c");
+    assertPrintSame("for(let [a]of b)c");
+    assertPrintSame("for(const [a]of b)c");
+  }
+
+  public void testDestructuringForOfLoops2() {
+    languageMode = LanguageMode.ECMASCRIPT6;
+
+    // The destructuring 'var' statement is a child of the for-of loop, but
+    // not the first child.
+    assertPrintSame("for(a of b)var {x}=y");
   }
 
   public void testBreakTrustedStrings() {
@@ -594,10 +501,10 @@ public class CodePrinterTest extends TestCase {
     // Test works with unary operators and calls.
     assertPrint("var a={}; for (var i = -(\"length\" in a); i;) {}",
         "var a={};for(var i=-(\"length\"in a);i;);");
-    assertPrint("var a={};function b_(p){ return p;};" +
-        "for(var i=1,j=b_(\"length\" in a);;) {}",
-        "var a={};function b_(p){return p}" +
-            "for(var i=1,j=b_(\"length\"in a);;);");
+    assertPrint("var a={};function b_(p){ return p;};"
+            + "for(var i=1,j=b_(\"length\" in a);;) {}",
+        "var a={};function b_(p){return p}"
+            + "for(var i=1,j=b_(\"length\"in a);;);");
 
     // Test we correctly handle an in operator in the test clause.
     assertPrint("var a={}; for (;(\"length\" in a);) {}",
@@ -636,16 +543,6 @@ public class CodePrinterTest extends TestCase {
 
   public void testLiteralProperty() {
     assertPrint("(64).toString()", "(64).toString()");
-  }
-
-  private void assertPrint(String js, String expected) {
-    parse(expected); // validate the expected string is valid JS
-    assertEquals(expected,
-        parsePrint(js, false, CodePrinter.DEFAULT_LINE_LENGTH_THRESHOLD));
-  }
-
-  private void assertPrintSame(String js) {
-    assertPrint(js, js);
   }
 
   // Make sure that the code generator doesn't associate an
@@ -717,8 +614,14 @@ public class CodePrinterTest extends TestCase {
 
   private void assertLineBreak(String js, String expected) {
     assertEquals(expected,
-        parsePrint(js, false, true,
-            CodePrinter.DEFAULT_LINE_LENGTH_THRESHOLD));
+        parsePrint(js, newCompilerOptions(new CompilerOptionBuilder() {
+          @Override
+          void setOptions(CompilerOptions options) {
+            options.setPrettyPrint(false);
+            options.setLineBreak(true);
+            options.setLineLengthThreshold(CodePrinter.DEFAULT_LINE_LENGTH_THRESHOLD);
+          }
+        })));
   }
 
   public void testPreferLineBreakAtEndOfFile() {
@@ -754,9 +657,25 @@ public class CodePrinterTest extends TestCase {
   private void assertLineBreakAtEndOfFile(String js,
       String expectedWithoutBreakAtEnd, String expectedWithBreakAtEnd) {
     assertEquals(expectedWithoutBreakAtEnd,
-        parsePrint(js, false, false, false, 30));
+        parsePrint(js, newCompilerOptions(new CompilerOptionBuilder() {
+          @Override
+          void setOptions(CompilerOptions options) {
+            options.setPrettyPrint(false);
+            options.setLineBreak(false);
+            options.setLineLengthThreshold(30);
+            options.setPreferLineBreakAtEndOfFile(false);
+          }
+        })));
     assertEquals(expectedWithBreakAtEnd,
-        parsePrint(js, false, false, true, 30));
+        parsePrint(js, newCompilerOptions(new CompilerOptionBuilder() {
+          @Override
+          void setOptions(CompilerOptions options) {
+            options.setPrettyPrint(false);
+            options.setLineBreak(false);
+            options.setLineLengthThreshold(30);
+            options.setPreferLineBreakAtEndOfFile(true);
+          }
+        })));
   }
 
   public void testPrettyPrinter() {
@@ -851,6 +770,8 @@ public class CodePrinterTest extends TestCase {
         "}\n");
 
     assertPrettyPrint("var a;", "var a;\n");
+    assertPrettyPrint("i--", "i--;\n");
+    assertPrettyPrint("i++", "i++;\n");
 
     // There must be a space before and after binary operators.
     assertPrettyPrint("var foo = 3+5;",
@@ -967,6 +888,60 @@ public class CodePrinterTest extends TestCase {
         "}\n");
   }
 
+  public void testPrettyPrinter_arrow() throws Exception {
+    languageMode = LanguageMode.ECMASCRIPT6;
+    assertPrettyPrint("(a)=>123;", "(a) => 123;\n");
+  }
+
+  public void testPrettyPrinter_defaultValue() throws Exception {
+    languageMode = LanguageMode.ECMASCRIPT6;
+    assertPrettyPrint("(a=1)=>123;", "(a = 1) => 123;\n");
+  }
+
+  // For https://github.com/google/closure-compiler/issues/782
+  public void testPrettyPrinter_spaceBeforeSingleQuote() throws Exception {
+    assertPrettyPrint("var f = function() { return 'hello'; };",
+        "var f = function() {\n" +
+            "  return 'hello';\n" +
+            "};\n",
+        new CompilerOptionBuilder() {
+          @Override
+          void setOptions(CompilerOptions options) {
+            options.setPreferSingleQuotes(true);
+          }
+        });
+  }
+
+  // For https://github.com/google/closure-compiler/issues/782
+  public void testPrettyPrinter_spaceBeforeUnaryOperators() throws Exception {
+    languageMode = LanguageMode.ECMASCRIPT6;
+
+    assertPrettyPrint("var f = function() { return !b; };",
+        "var f = function() {\n" +
+            "  return !b;\n" +
+            "};\n");
+    assertPrettyPrint("var f = function*(){yield -b}",
+        "var f = function*() {\n" +
+            "  yield -b;\n" +
+            "};\n");
+    assertPrettyPrint("var f = function() { return +b; };",
+        "var f = function() {\n" +
+            "  return +b;\n" +
+            "};\n");
+    assertPrettyPrint("var f = function() { throw ~b; };",
+        "var f = function() {\n" +
+            "  throw ~b;\n" +
+            "};\n");
+    assertPrettyPrint("var f = function() { return ++b; };",
+        "var f = function() {\n" +
+            "  return ++b;\n" +
+            "};\n");
+    assertPrettyPrint("var f = function() { return --b; };",
+        "var f = function() {\n" +
+            "  return --b;\n" +
+            "};\n");
+  }
+
   public void testTypeAnnotations() {
     assertTypeAnnotations(
         "/** @constructor */ function Foo(){}",
@@ -979,12 +954,12 @@ public class CodePrinterTest extends TestCase {
     // typedefs but currently they are resolved into the basic types in the
     // type registry.
     assertTypeAnnotations(
-        "/** @typedef {Array.<number>} */ goog.java.Long;\n"
+        "/** @typedef {Array<number>} */ goog.java.Long;\n"
         + "/** @param {!goog.java.Long} a*/\n"
         + "function f(a){};\n",
         "goog.java.Long;\n"
         + "/**\n"
-        + " * @param {(Array.<number>|null)} a\n"
+        + " * @param {(Array<number>|null)} a\n"
         + " * @return {undefined}\n"
         + " */\n"
         + "function f(a) {\n}\n");
@@ -1086,49 +1061,6 @@ public class CodePrinterTest extends TestCase {
         + "a.Bar = function() {\n};\n");
   }
 
-  public void testTypeAnnotationsDispatcher1() {
-    assertTypeAnnotations(
-        "var a = {};\n" +
-        "/** \n" +
-        " * @constructor \n" +
-        " * @javadispatch \n" +
-        " */\n" +
-        "a.Foo = function(){}",
-        "var a = {};\n" +
-        "/**\n" +
-        " * @constructor\n" +
-        " * @javadispatch\n" +
-        " */\n" +
-        "a.Foo = function() {\n" +
-        "};\n");
-  }
-
-  public void testTypeAnnotationsDispatcher2() {
-    assertTypeAnnotations(
-        "var a = {};\n" +
-        "/** \n" +
-        " * @constructor \n" +
-        " */\n" +
-        "a.Foo = function(){}\n" +
-        "/**\n" +
-        " * @javadispatch\n" +
-        " */\n" +
-        "a.Foo.prototype.foo = function() {};",
-
-        "var a = {};\n" +
-        "/**\n" +
-        " * @constructor\n" +
-        " */\n" +
-        "a.Foo = function() {\n" +
-        "};\n" +
-        "/**\n" +
-        " * @return {undefined}\n" +
-        " * @javadispatch\n" +
-        " */\n" +
-        "a.Foo.prototype.foo = function() {\n" +
-        "};\n");
-  }
-
   public void testU2UFunctionTypeAnnotation1() {
     assertTypeAnnotations(
         "/** @type {!Function} */ var x = function() {}",
@@ -1212,15 +1144,39 @@ public class CodePrinterTest extends TestCase {
   }
 
   private void assertPrettyPrint(String js, String expected) {
+    assertPrettyPrint(js, expected, new CompilerOptionBuilder() {
+      @Override void setOptions(CompilerOptions options) { /* no-op */ }
+    });
+  }
+
+  private void assertPrettyPrint(String js, String expected,
+                                 final CompilerOptionBuilder optionBuilder) {
     assertEquals(expected,
-        parsePrint(js, true, false,
-            CodePrinter.DEFAULT_LINE_LENGTH_THRESHOLD));
+        parsePrint(js, newCompilerOptions(new CompilerOptionBuilder() {
+          @Override
+          void setOptions(CompilerOptions options) {
+            options.setPrettyPrint(true);
+            options.setLineBreak(false);
+            options.setLineLengthThreshold(CodePrinter.DEFAULT_LINE_LENGTH_THRESHOLD);
+            optionBuilder.setOptions(options);
+          }
+        })));
   }
 
   private void assertTypeAnnotations(String js, String expected) {
     assertEquals(expected,
-        parsePrint(js, true, false,
-            CodePrinter.DEFAULT_LINE_LENGTH_THRESHOLD, true));
+        new CodePrinter.Builder(parse(js, true))
+            .setCompilerOptions(newCompilerOptions(new CompilerOptionBuilder() {
+              @Override
+              void setOptions(CompilerOptions options) {
+                options.setPrettyPrint(true);
+                options.setLineBreak(false);
+                options.setLineLengthThreshold(CodePrinter.DEFAULT_LINE_LENGTH_THRESHOLD);
+              }
+            }))
+            .setOutputTypes(true)
+            .setTypeRegistry(lastCompiler.getTypeIRegistry())
+            .build());
   }
 
   public void testSubtraction() {
@@ -1289,7 +1245,14 @@ public class CodePrinterTest extends TestCase {
 
   private void assertLineLength(String js, String expected) {
     assertEquals(expected,
-        parsePrint(js, false, true, 10));
+        parsePrint(js, newCompilerOptions(new CompilerOptionBuilder() {
+          @Override
+          void setOptions(CompilerOptions options) {
+            options.setPrettyPrint(false);
+            options.setLineBreak(true);
+            options.setLineLengthThreshold(10);
+          }
+        })));
   }
 
   public void testParsePrintParse() {
@@ -1353,7 +1316,7 @@ public class CodePrinterTest extends TestCase {
         "\n" + explanation, explanation);
   }
 
-  public void testDoLoopIECompatiblity() {
+  public void testDoLoopIECompatibility() {
     // Do loops within IFs cause syntax errors in IE6 and IE7.
     assertPrint("function f(){if(e1){do foo();while(e2)}else foo()}",
         "function f(){if(e1){do foo();while(e2)}else foo()}");
@@ -1380,7 +1343,7 @@ public class CodePrinterTest extends TestCase {
         "var i=0;a:do{b:do{i++;break b}while(0)}while(0)");
   }
 
-  public void testFunctionSafariCompatiblity() {
+  public void testFunctionSafariCompatibility() {
     // Functions within IFs cause syntax errors on Safari.
     assertPrint("function f(){if(e1){function goo(){return true}}else foo()}",
         "function f(){if(e1){function goo(){return true}}else foo()}");
@@ -1417,11 +1380,28 @@ public class CodePrinterTest extends TestCase {
     assertPrintNumber("1E-6", 0.000001);
     assertPrintNumber("-0x38d7ea4c68001", -0x38d7ea4c68001L);
     assertPrintNumber("0x38d7ea4c68001", 0x38d7ea4c68001L);
+    assertPrintNumber("0x7fffffffffffffff", 0x7fffffffffffffffL);
 
     assertPrintNumber("-1.01", -1.01);
     assertPrintNumber("-.01", -0.01);
     assertPrintNumber(".01", 0.01);
     assertPrintNumber("1.01", 1.01);
+  }
+
+  public void testBiggerThanMaxLongNumericLiterals() {
+    // Since ECMAScript implements IEEE 754 "round to nearest, ties to even",
+    // any literal in the range [0x7ffffffffffffe00,0x8000000000000400] will
+    // round to the same value, namely 2^63. The fact that we print this as
+    // 2^63-1 doesn't matter, since it must be rounded back to 2^63 at runtime.
+    // See:
+    //   http://www.ecma-international.org/ecma-262/5.1/#sec-8.5
+    assertPrint("9223372036854775808", "0x7fffffffffffffff");
+    assertPrint("0x8000000000000000", "0x7fffffffffffffff");
+    languageMode = LanguageMode.ECMASCRIPT6;
+    assertPrint(
+        "0b1000000000000000000000000000000000000000000000000000000000000000",
+        "0x7fffffffffffffff");
+    assertPrint("0o1000000000000000000000", "0x7fffffffffffffff");
   }
 
   // Make sure to test as both a String and a Node, because
@@ -1534,7 +1514,7 @@ public class CodePrinterTest extends TestCase {
     assertPrintSame("var a={[b](){}}");
     assertPrintSame("var a={[b](){alert(foo)}}");
     assertPrintSame("var a={*[b](){yield\"foo\"}}");
-    assertPrintSame("var a={[b]:(()=>c)}");
+    assertPrintSame("var a={[b]:()=>c}");
 
     assertPrintSame("var a={get [b](){return null}}");
     assertPrintSame("var a={set [b](val){window.b=val}}");
@@ -1626,7 +1606,19 @@ public class CodePrinterTest extends TestCase {
   }
 
   public void testStrict() {
-    String result = parsePrint("var x", false, false, 0, false, true);
+    String result = new CodePrinter.Builder(parse("var x", true))
+        .setCompilerOptions(newCompilerOptions(new CompilerOptionBuilder() {
+          @Override
+          void setOptions(CompilerOptions options) {
+            options.setPrettyPrint(false);
+            options.setLineBreak(false);
+            options.setLineLengthThreshold(0);
+          }
+        }))
+        .setOutputTypes(false)
+        .setTypeRegistry(lastCompiler.getTypeIRegistry())
+        .setTagAsStrict(true)
+        .build();
     assertEquals("'use strict';var x", result);
   }
 
@@ -1759,7 +1751,9 @@ public class CodePrinterTest extends TestCase {
 
   public void testManyCommas() {
     int numCommas = 10000;
-    List<String> numbers = Lists.newArrayList("0", "1");
+    List<String> numbers = new ArrayList<>();
+    numbers.add("0");
+    numbers.add("1");
     Node current = new Node(Token.COMMA, Node.newNumber(0), Node.newNumber(1));
     for (int i = 2; i < numCommas; i++) {
       current = new Node(Token.COMMA, current);
@@ -1777,7 +1771,9 @@ public class CodePrinterTest extends TestCase {
 
   public void testManyAdds() {
     int numAdds = 10000;
-    List<String> numbers = Lists.newArrayList("0", "1");
+    List<String> numbers = new ArrayList<>();
+    numbers.add("0");
+    numbers.add("1");
     Node current = new Node(Token.ADD, Node.newNumber(0), Node.newNumber(1));
     for (int i = 2; i < numAdds; i++) {
       current = new Node(Token.ADD, current);
@@ -1872,7 +1868,7 @@ public class CodePrinterTest extends TestCase {
         "function/** void */f(/** string */s,/** number */n){}");
 
     preserveTypeAnnotations = false;
-    assertPrint("/** @type {foo} */\nvar bar;", "var bar");
+    assertPrint("/** @type {foo} */var bar;", "var bar");
   }
 
   public void testDefaultParameters() {
@@ -1915,12 +1911,12 @@ public class CodePrinterTest extends TestCase {
     assertPrettyPrint(
         "class C{}",
         "class C {\n}\n");
-    // TODO(johnlenz): fix line breaks
     assertPrettyPrint(
         "class C{member(){}get f(){}}",
         "class C {\n" +
         "  member() {\n" +
-        "  }get f() {\n" +
+        "  }\n" +
+        "  get f() {\n" +
         "  }\n" +
         "}\n");
     assertPrettyPrint(
@@ -1954,10 +1950,16 @@ public class CodePrinterTest extends TestCase {
 
   public void testArrowFunction() {
     languageMode = LanguageMode.ECMASCRIPT6;
-    assertPrint("()=>1", "(()=>1)");
-    assertPrint("()=>{}", "(()=>{})");
-    assertPrint("a=>b", "((a)=>b)");
-    assertPrint("(a,b)=>b", "((a,b)=>b)");
+    assertPrintSame("()=>1");
+    assertPrint("(()=>1)", "()=>1");
+    assertPrintSame("()=>{}");
+    assertPrint("a=>b", "(a)=>b");
+    assertPrint("(a=>b)(1)", "((a)=>b)(1)");
+    assertPrintSame("var z={x:(a)=>1}");
+    assertPrint("(a,b)=>b", "(a,b)=>b");
+    assertPrintSame("()=>(a,b)");
+    assertPrint("(()=>a),b", "()=>a,b");
+    assertPrint("()=>(a=b)", "()=>a=b");
   }
 
   public void testDeclarations() {
@@ -1997,10 +1999,12 @@ public class CodePrinterTest extends TestCase {
     languageMode = LanguageMode.ECMASCRIPT6;
     // export declarations
     assertPrintSame("export var x=1");
+    assertPrintSame("export var x;export var y");
     assertPrintSame("export let x=1");
     assertPrintSame("export const x=1");
     assertPrintSame("export function f(){}");
     assertPrintSame("export class f{}");
+    assertPrintSame("export class f{}export class b{}");
 
     // export all from
     assertPrint("export * from 'a.b.c'", "export*from\"a.b.c\"");
@@ -2019,6 +2023,8 @@ public class CodePrinterTest extends TestCase {
     // export default
     assertPrintSame("export default x");
     assertPrintSame("export default 1");
+    assertPrintSame("export default class Foo{}export function f(){}");
+    assertPrintSame("export function f(){}export default class Foo{}");
   }
 
   public void testTemplateLiteral() {
@@ -2026,6 +2032,10 @@ public class CodePrinterTest extends TestCase {
     assertPrintSame("`hello`");
     assertPrint("`hel\rlo`", "`hel\nlo`");
     assertPrint("`hel\r\nlo`", "`hel\nlo`");
+    assertPrint("`hello`\n'world'", "`hello`;\"world\"");
+    assertPrint("`hello`\n`world`", "`hello``world`");
+    assertPrint("var x=`TestA`\n`TemplateB`", "var x=`TestA``TemplateB`");
+    assertPrintSame("`hello``world`");
 
     assertPrintSame("`hello${world}!`");
     assertPrintSame("`hello${world} ${name}!`");

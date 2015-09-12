@@ -19,7 +19,7 @@ package com.google.javascript.jscomp;
 /**
  * @author johnlenz@google.com (John Lenz)
  */
-public class RemoveUnusedClassPropertiesTest extends CompilerTestCase {
+public final class RemoveUnusedClassPropertiesTest extends CompilerTestCase {
 
   private static final String EXTERNS =
       "var window;\n" +
@@ -167,6 +167,22 @@ public class RemoveUnusedClassPropertiesTest extends CompilerTestCase {
         "function B() {this.a = new A();}\n" +
         "B.prototype.dostuff = function() {this.a.foo++;alert('hi');}\n" +
         "new B().dostuff();\n");
+  }
+
+  public void testNoRemoveSideEffect1() {
+    test(
+        "function A() {alert('me'); return function(){}}\n" +
+        "A().prototype.foo = function() {};\n",
+        "function A() {alert('me'); return function(){}}\n" +
+        "A(),function(){};\n");
+  }
+
+  public void testNoRemoveSideEffect2() {
+    test(
+        "function A() {alert('me'); return function(){}}\n" +
+        "A().prototype.foo++;\n",
+        "function A() {alert('me'); return function(){}}\n" +
+        "A(),0;\n");
   }
 
   public void testPrototypeProps1() {

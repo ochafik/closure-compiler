@@ -16,12 +16,15 @@
 
 package com.google.javascript.jscomp.newtypes;
 
+import com.google.common.annotations.GwtIncompatible;
+
 import java.lang.reflect.Method;
 import java.util.Iterator;
 import java.util.Set;
 
+@GwtIncompatible("java.lang.reflect")
 /** A persistent set that simply wraps Clojure's implementation */
-public class ClojurePersistentHashSet<K> extends PersistentSet<K> {
+final class ClojurePersistentHashSet<K> extends PersistentSet<K> {
   private static Method cons;
   private static Method disjoin;
   private final Set set;
@@ -75,6 +78,7 @@ public class ClojurePersistentHashSet<K> extends PersistentSet<K> {
   }
 
   @Override
+  @SuppressWarnings("unchecked")
   public Iterator<K> iterator() {
     return this.set.iterator();
   }

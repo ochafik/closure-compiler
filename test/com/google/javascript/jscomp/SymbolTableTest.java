@@ -16,19 +16,23 @@
 
 package com.google.javascript.jscomp;
 
+import static com.google.common.truth.Truth.assertThat;
+
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
-import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.SymbolTable.Reference;
 import com.google.javascript.jscomp.SymbolTable.Symbol;
 import com.google.javascript.jscomp.SymbolTable.SymbolScope;
+import com.google.javascript.jscomp.testing.BlackHoleErrorManager;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.JSDocInfo.Visibility;
 import com.google.javascript.rhino.Token;
 
 import junit.framework.TestCase;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -36,7 +40,7 @@ import java.util.Set;
  * @author nicksantos@google.com (Nick Santos)
  */
 
-public class SymbolTableTest extends TestCase {
+public final class SymbolTableTest extends TestCase {
 
   private static final String EXTERNS = CompilerTypeTestCase.DEFAULT_EXTERNS +
       "var Number;" +
@@ -53,7 +57,7 @@ public class SymbolTableTest extends TestCase {
     CompilationLevel.SIMPLE_OPTIMIZATIONS.setOptionsForCompilationLevel(
         options);
     WarningLevel.VERBOSE.setOptionsForWarningLevel(options);
-    options.ideMode = true;
+    options.setIdeMode(true);
   }
 
   public void testGlobalVar() throws Exception {
@@ -64,7 +68,7 @@ public class SymbolTableTest extends TestCase {
     assertEquals("number", getGlobalVar(table, "x").getType().toString());
 
     // 2 == sizeof({x, *global*})
-    assertEquals(2, getVars(table).size());
+    assertThat(getVars(table)).hasSize(2);
   }
 
   public void testGlobalThisReferences() throws Exception {
@@ -75,7 +79,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(global);
 
     List<Reference> refs = table.getReferenceList(global);
-    assertEquals(1, refs.size());
+    assertThat(refs).hasSize(1);
   }
 
   public void testGlobalThisReferences2() throws Exception {
@@ -86,7 +90,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(global);
 
     List<Reference> refs = table.getReferenceList(global);
-    assertEquals(0, refs.size());
+    assertThat(refs).isEmpty();
   }
 
   public void testGlobalThisReferences3() throws Exception {
@@ -96,7 +100,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(global);
 
     List<Reference> refs = table.getReferenceList(global);
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
   }
 
   public void testGlobalThisPropertyReferences() throws Exception {
@@ -107,7 +111,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(foo);
 
     List<Reference> refs = table.getReferenceList(foo);
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
   }
 
   public void testGlobalVarReferences() throws Exception {
@@ -116,7 +120,7 @@ public class SymbolTableTest extends TestCase {
     Symbol x = getGlobalVar(table, "x");
     List<Reference> refs = table.getReferenceList(x);
 
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
     assertEquals(x.getDeclaration(), refs.get(0));
     assertEquals(Token.VAR, refs.get(0).getNode().getParent().getType());
     assertEquals(Token.ASSIGN, refs.get(1).getNode().getParent().getType());
@@ -128,7 +132,7 @@ public class SymbolTableTest extends TestCase {
     Symbol x = getLocalVar(table, "x");
     List<Reference> refs = table.getReferenceList(x);
 
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
     assertEquals(x.getDeclaration(), refs.get(0));
     assertEquals(Token.PARAM_LIST, refs.get(0).getNode().getParent().getType());
     assertEquals(Token.RETURN, refs.get(1).getNode().getParent().getType());
@@ -145,7 +149,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(t);
 
     List<Reference> refs = table.getReferenceList(t);
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
   }
 
   public void testLocalThisReferences2() throws Exception {
@@ -161,7 +165,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(t);
 
     List<Reference> refs = table.getReferenceList(t);
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
   }
 
   public void testLocalThisReferences3() throws Exception {
@@ -175,7 +179,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(t);
 
     List<Reference> refs = table.getReferenceList(t);
-    assertEquals(0, refs.size());
+    assertThat(refs).isEmpty();
   }
 
   public void testNamespacedReferences() throws Exception {
@@ -187,15 +191,15 @@ public class SymbolTableTest extends TestCase {
         "goog.dom.DomHelper = function(){};");
     Symbol goog = getGlobalVar(table, "goog");
     assertNotNull(goog);
-    assertEquals(3, Iterables.size(table.getReferences(goog)));
+    assertThat(table.getReferences(goog)).hasSize(3);
 
     Symbol googDom = getGlobalVar(table, "goog.dom");
     assertNotNull(googDom);
-    assertEquals(2, Iterables.size(table.getReferences(googDom)));
+    assertThat(table.getReferences(googDom)).hasSize(2);
 
     Symbol googDomHelper = getGlobalVar(table, "goog.dom.DomHelper");
     assertNotNull(googDomHelper);
-    assertEquals(1, Iterables.size(table.getReferences(googDomHelper)));
+    assertThat(table.getReferences(googDomHelper)).hasSize(1);
   }
 
   public void testIncompleteNamespacedReferences() throws Exception {
@@ -205,15 +209,15 @@ public class SymbolTableTest extends TestCase {
         "var y = goog.dom.DomHelper;\n");
     Symbol goog = getGlobalVar(table, "goog");
     assertNotNull(goog);
-    assertEquals(2, table.getReferenceList(goog).size());
+    assertThat(table.getReferenceList(goog)).hasSize(2);
 
     Symbol googDom = getGlobalVar(table, "goog.dom");
     assertNotNull(googDom);
-    assertEquals(2, table.getReferenceList(googDom).size());
+    assertThat(table.getReferenceList(googDom)).hasSize(2);
 
     Symbol googDomHelper = getGlobalVar(table, "goog.dom.DomHelper");
     assertNotNull(googDomHelper);
-    assertEquals(2, Iterables.size(table.getReferences(googDomHelper)));
+    assertThat(table.getReferences(googDomHelper)).hasSize(2);
   }
 
   public void testGlobalRichObjectReference() throws Exception {
@@ -235,7 +239,7 @@ public class SymbolTableTest extends TestCase {
 
     Symbol propB = getGlobalVar(table, "A.prototype.b");
     assertNotNull(propB);
-    assertEquals(5, table.getReferenceList(propB).size());
+    assertThat(table.getReferenceList(propB)).hasSize(5);
   }
 
   public void testRemovalOfNamespacedReferencesOfProperties()
@@ -261,7 +265,7 @@ public class SymbolTableTest extends TestCase {
         "goog.scope(function() {});");
     Symbol googScope = getGlobalVar(table, "goog.scope");
     assertNotNull(googScope);
-    assertEquals(2, Iterables.size(table.getReferences(googScope)));
+    assertThat(table.getReferences(googScope)).hasSize(2);
   }
 
   public void testGoogRequireReferences() throws Exception {
@@ -282,24 +286,23 @@ public class SymbolTableTest extends TestCase {
     // NOTE(nicksantos): In the future, we may de-dupe references such
     // that the one in the goog.provide string and the one created by
     // ProcessClosurePrimitives count as the same reference.
-    assertEquals(8, Iterables.size(table.getReferences(goog)));
+    assertThat(table.getReferences(goog)).hasSize(8);
   }
 
   public void testGoogRequireReferences2() throws Exception {
-    options.brokenClosureRequiresLevel = CheckLevel.OFF;
-    SymbolTable table = createSymbolTable(
-        "foo.bar = function(){};  // definition\n"
+    options.setBrokenClosureRequiresLevel(CheckLevel.OFF);
+    SymbolTable table = createSymbolTable("foo.bar = function(){};  // definition\n"
         + "goog.require('foo.bar')\n");
     Symbol fooBar = getGlobalVar(table, "foo.bar");
     assertNotNull(fooBar);
-    assertEquals(2, Iterables.size(table.getReferences(fooBar)));
+    assertThat(table.getReferences(fooBar)).hasSize(2);
   }
 
   public void testGlobalVarInExterns() throws Exception {
     SymbolTable table = createSymbolTable("customExternFn(1);");
     Symbol fn = getGlobalVar(table, "customExternFn");
     List<Reference> refs = table.getReferenceList(fn);
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
 
     SymbolScope scope = table.getEnclosingScope(refs.get(0).getNode());
     assertTrue(scope.isGlobalScope());
@@ -311,7 +314,7 @@ public class SymbolTableTest extends TestCase {
     SymbolTable table = createSymbolTable("");
     Symbol arg = getLocalVar(table, "customExternArg");
     List<Reference> refs = table.getReferenceList(arg);
-    assertEquals(1, refs.size());
+    assertThat(refs).hasSize(1);
 
     Symbol fn = getGlobalVar(table, "customExternFn");
     SymbolScope scope = table.getEnclosingScope(refs.get(0).getNode());
@@ -332,11 +335,11 @@ public class SymbolTableTest extends TestCase {
     Symbol fooPrototype = getGlobalVar(table, "Foo.prototype");
     Symbol fn = getGlobalVar(table, "Function");
     assertEquals(
-        Lists.newArrayList(foo, bar), table.getAllSymbolsForTypeOf(x));
+        ImmutableList.of(foo, bar), table.getAllSymbolsForTypeOf(x));
     assertEquals(
-        Lists.newArrayList(fn), table.getAllSymbolsForTypeOf(foo));
+        ImmutableList.of(fn), table.getAllSymbolsForTypeOf(foo));
     assertEquals(
-        Lists.newArrayList(foo), table.getAllSymbolsForTypeOf(fooPrototype));
+        ImmutableList.of(foo), table.getAllSymbolsForTypeOf(fooPrototype));
     assertEquals(
         foo,
         table.getSymbolDeclaredBy(
@@ -351,8 +354,7 @@ public class SymbolTableTest extends TestCase {
 
     Symbol method =
         getGlobalVar(table, "DomHelper").getPropertyScope().getSlot("method");
-    assertEquals(
-        3, Iterables.size(table.getReferences(method)));
+    assertThat(table.getReferences(method)).hasSize(3);
   }
 
   public void testMethodReferences() throws Exception {
@@ -364,8 +366,7 @@ public class SymbolTableTest extends TestCase {
 
     Symbol method =
         getGlobalVar(table, "DomHelper.prototype.method");
-    assertEquals(
-        3, Iterables.size(table.getReferences(method)));
+    assertThat(table.getReferences(method)).hasSize(3);
   }
 
   public void testSuperClassMethodReferences() throws Exception {
@@ -386,8 +387,7 @@ public class SymbolTableTest extends TestCase {
 
     Symbol methodA =
         getGlobalVar(table, "A.prototype.method");
-    assertEquals(
-        2, Iterables.size(table.getReferences(methodA)));
+    assertThat(table.getReferences(methodA)).hasSize(2);
   }
 
   public void testMethodReferencesMissingTypeInfo() throws Exception {
@@ -405,8 +405,7 @@ public class SymbolTableTest extends TestCase {
 
     Symbol method =
         getGlobalVar(table, "DomHelper.prototype.method");
-    assertEquals(
-        3, Iterables.size(table.getReferences(method)));
+    assertThat(table.getReferences(method)).hasSize(3);
   }
 
   public void testFieldReferencesMissingTypeInfo() throws Exception {
@@ -422,7 +421,7 @@ public class SymbolTableTest extends TestCase {
 
     Symbol prop =
         getGlobalVar(table, "DomHelper.prototype.prop");
-    assertEquals(3, table.getReferenceList(prop).size());
+    assertThat(table.getReferenceList(prop)).hasSize(3);
 
     assertNull(getLocalVar(table, "this.prop"));
   }
@@ -436,8 +435,7 @@ public class SymbolTableTest extends TestCase {
         "  return (new DomHelper()).field + (new DomHelper()).field; };");
 
     Symbol field = getGlobalVar(table, "DomHelper.prototype.field");
-    assertEquals(
-        3, Iterables.size(table.getReferences(field)));
+    assertThat(table.getReferences(field)).hasSize(3);
   }
 
   public void testUndeclaredFieldReferences() throws Exception {
@@ -478,7 +476,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(prototype);
 
     List<Reference> refs = table.getReferenceList(prototype);
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
   }
 
   public void testPrototypeReferences3() throws Exception {
@@ -488,7 +486,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(fooPrototype);
 
     List<Reference> refs = table.getReferenceList(fooPrototype);
-    assertEquals(1, refs.size());
+    assertThat(refs).hasSize(1);
     assertEquals(Token.NAME, refs.get(0).getNode().getType());
 
     // Make sure that the ctor and its prototype are declared at the
@@ -505,9 +503,9 @@ public class SymbolTableTest extends TestCase {
     Symbol fooPrototype = getGlobalVar(table, "Foo.prototype");
     assertNotNull(fooPrototype);
 
-    List<Reference> refs = Lists.newArrayList(
+    List<Reference> refs = ImmutableList.copyOf(
         table.getReferences(fooPrototype));
-    assertEquals(1, refs.size());
+    assertThat(refs).hasSize(1);
     assertEquals(Token.GETPROP, refs.get(0).getNode().getType());
     assertEquals("Foo.prototype", refs.get(0).getNode().getQualifiedName());
   }
@@ -519,7 +517,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(fooPrototype);
 
     List<Reference> refs = table.getReferenceList(fooPrototype);
-    assertEquals(1, refs.size());
+    assertThat(refs).hasSize(1);
     assertEquals(Token.GETPROP, refs.get(0).getNode().getType());
 
     // Make sure that the ctor and its prototype are declared at the
@@ -544,7 +542,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(foo);
 
     List<Reference> refs = table.getReferenceList(foo);
-    assertEquals(5, refs.size());
+    assertThat(refs).hasSize(5);
 
     assertEquals(1, refs.get(0).getNode().getLineno());
     assertEquals(29, refs.get(0).getNode().getCharno());
@@ -602,7 +600,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(foo);
 
     List<Reference> refs = table.getReferenceList(foo);
-    assertEquals(5, refs.size());
+    assertThat(refs).hasSize(5);
 
     assertEquals(2, refs.get(0).getNode().getLineno());
     assertEquals(20, refs.get(0).getNode().getCharno());
@@ -628,7 +626,7 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(x);
 
     List<Reference> refs = table.getReferenceList(x);
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
 
     assertEquals(code.indexOf("x) {"), refs.get(0).getNode().getCharno());
     assertEquals(code.indexOf("x */"), refs.get(1).getNode().getCharno());
@@ -674,7 +672,7 @@ public class SymbolTableTest extends TestCase {
 
     Symbol method = getGlobalVar(table, "goog.addSingletonGetter");
     List<Reference> refs = table.getReferenceList(method);
-    assertEquals(2, refs.size());
+    assertThat(refs).hasSize(2);
 
     // Note that the declaration should show up second.
     assertEquals(7, method.getDeclaration().getNode().getLineno());
@@ -717,14 +715,14 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(bCtor);
 
     List<Reference> bRefs = table.getReferenceList(bCtor);
-    assertEquals(2, bRefs.size());
+    assertThat(bRefs).hasSize(2);
     assertEquals(11, bCtor.getDeclaration().getNode().getLineno());
 
     Symbol cCtor = getGlobalVar(table, "goog.C.prototype.constructor");
     assertNotNull(cCtor);
 
     List<Reference> cRefs = table.getReferenceList(cCtor);
-    assertEquals(2, cRefs.size());
+    assertThat(cRefs).hasSize(2);
     assertEquals(26, cCtor.getDeclaration().getNode().getLineno());
   }
 
@@ -758,7 +756,7 @@ public class SymbolTableTest extends TestCase {
     assertNull(getGlobalVar(table, "F.prototype.field1"));
 
     Symbol sym = getGlobalVar(table, "F.prototype.method1");
-    assertEquals(1, table.getReferenceList(sym).size());
+    assertThat(table.getReferenceList(sym)).hasSize(1);
   }
 
   public void testTypeCheckingOff() {
@@ -778,7 +776,7 @@ public class SymbolTableTest extends TestCase {
     assertNull(getGlobalVar(table, "F.prototype.method1"));
 
     Symbol sym = getGlobalVar(table, "F");
-    assertEquals(3, table.getReferenceList(sym).size());
+    assertThat(table.getReferenceList(sym)).hasSize(3);
   }
 
   public void testSuperClassReference() throws Exception {
@@ -809,9 +807,9 @@ public class SymbolTableTest extends TestCase {
     assertNotNull(good);
 
     List<Reference> refs = table.getReferenceList(good);
-    assertEquals(2, refs.size());
-    assertEquals("a.b.DerivedClass.superClass_.doSomething",
-        refs.get(1).getNode().getQualifiedName());
+    assertThat(refs).hasSize(2);
+    assertEquals(
+        "a.b.DerivedClass.superClass_.doSomething", refs.get(1).getNode().getQualifiedName());
   }
 
   public void testInnerEnum() throws Exception {
@@ -838,7 +836,7 @@ public class SymbolTableTest extends TestCase {
     Symbol abc = getGlobalVar(table, "a.b.c");
 
     assertNotNull(abc);
-    assertEquals(1, table.getReferenceList(abc).size());
+    assertThat(table.getReferenceList(abc)).hasSize(1);
 
     assertEquals("{b: {c: function (): undefined}}", a.getType().toString());
     assertEquals("{c: function (): undefined}", ab.getType().toString());
@@ -853,7 +851,7 @@ public class SymbolTableTest extends TestCase {
     Symbol abc = getGlobalVar(table, "a.b.c");
 
     assertNotNull(abc);
-    assertEquals(1, table.getReferenceList(abc).size());
+    assertThat(table.getReferenceList(abc)).hasSize(1);
 
     assertEquals("{b: {c: function (): undefined}}", a.getType().toString());
     assertEquals("{c: function (): undefined}", ab.getType().toString());
@@ -870,12 +868,12 @@ public class SymbolTableTest extends TestCase {
     Symbol x = getDocVar(table, "x");
     assertNotNull(x);
     assertEquals("number", x.getType().toString());
-    assertEquals(1, table.getReferenceList(x).size());
+    assertThat(table.getReferenceList(x)).hasSize(1);
 
     Symbol y = getDocVar(table, "y");
     assertNotNull(x);
     assertNull(y.getType());
-    assertEquals(1, table.getReferenceList(y).size());
+    assertThat(table.getReferenceList(y)).hasSize(1);
   }
 
   public void testNamespaceDefinitionOrder() throws Exception {
@@ -1104,7 +1102,7 @@ public class SymbolTableTest extends TestCase {
 
   /** Returns all non-extern vars. */
   private List<Symbol> getVars(SymbolTable table) {
-    List<Symbol> result = Lists.newArrayList();
+    List<Symbol> result = new ArrayList<>();
     for (Symbol symbol : table.getAllSymbols()) {
       if (symbol.getDeclaration() != null &&
           !symbol.getDeclaration().getNode().isFromExterns()) {
@@ -1115,12 +1113,13 @@ public class SymbolTableTest extends TestCase {
   }
 
   private SymbolTable createSymbolTable(String input) {
-    List<SourceFile> inputs = Lists.newArrayList(
+    List<SourceFile> inputs = ImmutableList.of(
         SourceFile.fromCode("in1", input));
-    List<SourceFile> externs = Lists.newArrayList(
+    List<SourceFile> externs = ImmutableList.of(
         SourceFile.fromCode("externs1", EXTERNS));
 
     Compiler compiler = new Compiler();
+    BlackHoleErrorManager.silence(compiler);
     compiler.compile(externs, inputs, options);
     return assertSymbolTableValid(compiler.buildKnownSymbolTable());
   }
@@ -1130,7 +1129,8 @@ public class SymbolTableTest extends TestCase {
    * Returns the same table for easy chaining.
    */
   private SymbolTable assertSymbolTableValid(SymbolTable table) {
-    Set<Symbol> allSymbols = Sets.newHashSet(table.getAllSymbols());
+    Set<Symbol> allSymbols = new HashSet<>();
+    Iterables.addAll(allSymbols, table.getAllSymbols());
     for (Symbol sym : table.getAllSymbols()) {
       // Make sure that grabbing the symbol's scope and looking it up
       // again produces the same symbol.
@@ -1159,7 +1159,7 @@ public class SymbolTableTest extends TestCase {
 
     // The main reference list should never contain the synthetic declaration
     // for the global root.
-    assertFalse(globalRefs.contains(global.getDeclaration()));
+    assertThat(globalRefs).doesNotContain(global.getDeclaration());
 
     return table;
   }

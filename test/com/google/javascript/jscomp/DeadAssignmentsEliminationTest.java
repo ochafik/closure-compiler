@@ -22,15 +22,10 @@ import com.google.javascript.rhino.Node;
  * Tests for {@link DeadAssignmentsElimination}.
  *
  */
-public class DeadAssignmentsEliminationTest extends CompilerTestCase {
+public final class DeadAssignmentsEliminationTest extends CompilerTestCase {
 
   public DeadAssignmentsEliminationTest() {
     super("var extern;");
-  }
-
-  @Override
-  public void setUp() {
-    super.enableLineNumberCheck(true);
   }
 
   @Override
@@ -38,7 +33,7 @@ public class DeadAssignmentsEliminationTest extends CompilerTestCase {
     return new CompilerPass() {
       @Override
       public void process(Node externs, Node js) {
-        NodeTraversal.traverse(
+        NodeTraversal.traverseEs6(
             compiler, js, new DeadAssignmentsElimination(compiler));
       }
     };

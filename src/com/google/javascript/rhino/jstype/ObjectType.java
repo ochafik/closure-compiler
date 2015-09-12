@@ -45,11 +45,14 @@ import static com.google.javascript.rhino.jstype.TernaryValue.UNKNOWN;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.Node;
+import com.google.javascript.rhino.ObjectTypeI;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Object type.
@@ -79,7 +82,9 @@ import java.util.Set;
  * declared or inferred.
  *
  */
-public abstract class ObjectType extends JSType implements StaticScope<JSType> {
+public abstract class ObjectType
+    extends JSType
+    implements ObjectTypeI {
   private boolean visited;
   private JSDocInfo docInfo = null;
   private boolean unknown = true;
@@ -92,10 +97,8 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
     super(registry, templateTypeMap);
   }
 
-  @Override
   public Node getRootNode() { return null; }
 
-  @Override
   public ObjectType getParentScope() {
     return getImplicitPrototype();
   }
@@ -111,17 +114,14 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
    * Default getSlot implementation. This gets overridden by FunctionType
    * for lazily-resolved prototypes.
    */
-  @Override
   public Property getSlot(String name) {
     return getPropertyMap().getSlot(name);
   }
 
-  @Override
   public Property getOwnSlot(String name) {
     return getPropertyMap().getOwnProperty(name);
   }
 
-  @Override
   public JSType getTypeOfThis() {
     return null;
   }
@@ -217,7 +217,7 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
   public String getNormalizedReferenceName() {
     String name = getReferenceName();
     if (name != null) {
-      int pos = name.indexOf("(");
+      int pos = name.indexOf('(');
       if (pos != -1) {
         return name.substring(0, pos);
       }
@@ -267,6 +267,7 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
    * @return this object's constructor or {@code null} if it is a native
    * object (constructed natively v.s. by instantiation of a function)
    */
+  @Override
   public abstract FunctionType getConstructor();
 
   /**
@@ -400,6 +401,11 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
     // by default, do nothing
   }
 
+  /** Sets the node where the property was defined. */
+  public void setPropertyNode(String propertyName, Node defSite) {
+    // by default, do nothing
+  }
+
   @Override
   public JSType findPropertyType(String propertyName) {
     return hasProperty(propertyName) ?
@@ -418,7 +424,7 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
    *         returns {@code null}.
    */
   public JSType getPropertyType(String propertyName) {
-    StaticSlot<JSType> slot = getSlot(propertyName);
+    StaticTypedSlot<JSType> slot = getSlot(propertyName);
     if (slot == null) {
       if (isNoResolvedType() || isCheckedUnknownType()) {
         return getNativeType(JSTypeNative.CHECKED_UNKNOWN_TYPE);
@@ -457,7 +463,7 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
    * Checks whether the property's type is inferred.
    */
   public boolean isPropertyTypeInferred(String propertyName) {
-    StaticSlot<JSType> slot = getSlot(propertyName);
+    StaticTypedSlot<JSType> slot = getSlot(propertyName);
     return slot == null ? false : slot.isTypeInferred();
   }
 
@@ -465,8 +471,14 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
    * Checks whether the property's type is declared.
    */
   public boolean isPropertyTypeDeclared(String propertyName) {
-    StaticSlot<JSType> slot = getSlot(propertyName);
+    StaticTypedSlot<JSType> slot = getSlot(propertyName);
     return slot == null ? false : !slot.isTypeInferred();
+  }
+
+  @Override
+  public boolean isStructuralType() {
+    FunctionType constructor = this.getConstructor();
+    return constructor != null && constructor.isStructuralType();
   }
 
   /**
@@ -494,7 +506,7 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
    * its supertypes.
    */
   public Set<String> getPropertyNames() {
-    Set<String> props = Sets.newTreeSet();
+    Set<String> props = new TreeSet<>();
     collectPropertyNames(props);
     return props;
   }
@@ -631,5 +643,17 @@ public abstract class ObjectType extends JSType implements StaticScope<JSType> {
    */
   public Iterable<ObjectType> getCtorExtendedInterfaces() {
     return ImmutableSet.of();
+  }
+
+  /**
+   * get the map of properties to types covered in an object type
+   * @return a Map that maps the property's name to the property's type
+   */
+  public Map<String, JSType> getPropertyTypeMap() {
+    Map<String, JSType> propTypeMap = new HashMap<String, JSType>();
+    for (String name : this.getPropertyNames()) {
+      propTypeMap.put(name, this.getPropertyType(name));
+    }
+    return propTypeMap;
   }
 }

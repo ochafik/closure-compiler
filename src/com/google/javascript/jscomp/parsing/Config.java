@@ -27,7 +27,7 @@ import java.util.Set;
  *
  * @author nicksantos@google.com (Nick Santos)
  */
-public class Config {
+public final class Config {
 
   /** JavaScript mode */
   public enum LanguageMode {
@@ -36,6 +36,7 @@ public class Config {
     ECMASCRIPT5_STRICT,
     ECMASCRIPT6,
     ECMASCRIPT6_STRICT,
+    ECMASCRIPT6_TYPED,  // Implies STRICT.
   }
 
   /**
@@ -64,20 +65,18 @@ public class Config {
    */
   final LanguageMode languageMode;
 
-  /**
-   * Accept `const' keyword.
-   */
-  final boolean acceptConstKeyword;
+  Config(Set<String> annotationWhitelist, Set<String> suppressionNames,
+      boolean isIdeMode, LanguageMode languageMode) {
+    this(annotationWhitelist, suppressionNames, isIdeMode, isIdeMode, languageMode);
+  }
 
   Config(Set<String> annotationWhitelist, Set<String> suppressionNames,
-      boolean isIdeMode, LanguageMode languageMode,
-      boolean acceptConstKeyword) {
+      boolean isIdeMode, boolean parseJsDocDocumentation, LanguageMode languageMode) {
     this.annotationNames = buildAnnotationNames(annotationWhitelist);
-    this.parseJsDocDocumentation = isIdeMode;
+    this.parseJsDocDocumentation = parseJsDocDocumentation;
     this.suppressionNames = suppressionNames;
     this.isIdeMode = isIdeMode;
     this.languageMode = languageMode;
-    this.acceptConstKeyword = acceptConstKeyword;
   }
 
   /**

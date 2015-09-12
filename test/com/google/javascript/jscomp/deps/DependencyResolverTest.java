@@ -16,19 +16,21 @@
 
 package com.google.javascript.jscomp.deps;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Sets;
 
 import junit.framework.TestCase;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Set;
 
 /**
  * Tests for DependencyResolver.
  */
-public class DependencyResolverTest extends TestCase {
+public final class DependencyResolverTest extends TestCase {
 
   DependencyFile fakeDeps1 = new DependencyFile(new VirtualFile("deps1",
       "goog.addDependency('a.js', ['a'], []);\n"
@@ -51,33 +53,35 @@ public class DependencyResolverTest extends TestCase {
 
   public void testBasicCase() throws Exception {
      Collection<String> deps = resolver.getDependencies("goog.require('a');");
-     assertEquals("base.js,a.js", Joiner.on(",").useForNull("null").join(deps));
+     assertThat(Joiner.on(",").useForNull("null").join(deps)).isEqualTo("base.js,a.js");
   }
 
   public void testSimpleDependencies() throws Exception {
      Collection<String> deps = resolver.getDependencies("goog.require('c');");
-     assertEquals("base.js,a.js,c.js", Joiner.on(",").useForNull("null").join(deps));
+     assertThat(Joiner.on(",").useForNull("null").join(deps)).isEqualTo("base.js,a.js,c.js");
   }
 
   public void testTransitiveDependencies() throws Exception {
      Collection<String> deps = resolver.getDependencies("goog.require('e');");
-     assertEquals("base.js,a.js,c.js,e.js", Joiner.on(",").useForNull("null").join(deps));
+     assertThat(Joiner.on(",").useForNull("null").join(deps)).isEqualTo("base.js,a.js,c.js,e.js");
   }
 
   public void testMultipleRequires() throws Exception {
      Collection<String> deps = resolver.getDependencies(
          "goog.require('e');goog.require('a');goog.require('b');");
-     assertEquals("base.js,a.js,c.js,e.js,b.js", Joiner.on(",").useForNull("null").join(deps));
+     assertThat(Joiner.on(",").useForNull("null").join(deps))
+         .isEqualTo("base.js,a.js,c.js,e.js,b.js");
   }
 
   public void testOneMoreForGoodMeasure() throws Exception {
     Collection<String> deps = resolver.getDependencies(
         "goog.require('g');goog.require('f');goog.require('c');");
-    assertEquals("base.js,a.js,b.js,c.js,g.js,f.js", Joiner.on(",").useForNull("null").join(deps));
+    assertThat(Joiner.on(",").useForNull("null").join(deps))
+        .isEqualTo("base.js,a.js,b.js,c.js,g.js,f.js");
   }
 
   public void testSharedSeenSetNoBaseFile() throws Exception {
-    Set<String> seen = Sets.newHashSet();
+    Set<String> seen = new HashSet<>();
 
     Collection<String> deps = resolver.getDependencies(
     "goog.require('g');goog.require('f');goog.require('c');", seen, false);
@@ -85,12 +89,12 @@ public class DependencyResolverTest extends TestCase {
     Collection<String> depsLater = resolver.getDependencies(
     "goog.require('f');goog.require('c');", seen, false);
 
-    assertEquals("a.js,b.js,c.js,g.js,f.js", Joiner.on(",").useForNull("null").join(deps));
-    assertEquals("", Joiner.on(",").useForNull("null").join(depsLater));
+    assertThat(Joiner.on(",").useForNull("null").join(deps)).isEqualTo("a.js,b.js,c.js,g.js,f.js");
+    assertThat(depsLater).isEmpty();
   }
 
   public void testSharedSeenSetNoBaseFileNewRequires() throws Exception {
-    Set<String> seen = Sets.newHashSet();
+    Set<String> seen = new HashSet<>();
 
     Collection<String> deps = resolver.getDependencies(
         "goog.require('f');goog.require('c');", seen, false);
@@ -98,30 +102,31 @@ public class DependencyResolverTest extends TestCase {
     Collection<String> depsLater = resolver.getDependencies(
         "goog.require('g');goog.require('c');", seen, false);
 
-    assertEquals("b.js,a.js,c.js,f.js", Joiner.on(",").useForNull("null").join(deps));
-    assertEquals("g.js", Joiner.on(",").useForNull("null").join(depsLater));
+    assertThat(Joiner.on(",").useForNull("null").join(deps)).isEqualTo("b.js,a.js,c.js,f.js");
+    assertThat(Joiner.on(",").useForNull("null").join(depsLater)).isEqualTo("g.js");
   }
 
   public void testSharedSeenSetNoBaseFileMultipleProvides() throws Exception {
-    Set<String> seen = Sets.newHashSet();
+    Set<String> seen = new HashSet<>();
 
     Collection<String> deps = resolver.getDependencies(
         "goog.require('h');goog.require('i');", seen, false);
 
-    assertEquals("a.js,b.js,c.js,g.js,d.js,h.js", Joiner.on(",").useForNull("null").join(deps));
+    assertThat(Joiner.on(",").useForNull("null").join(deps))
+        .isEqualTo("a.js,b.js,c.js,g.js,d.js,h.js");
   }
 
-  public void testNonExistantProvideLoose() throws Exception {
-    Set<String> seen = Sets.newHashSet();
+  public void testNonExistentProvideLoose() throws Exception {
+    Set<String> seen = new HashSet<>();
     resolver = new DefaultDependencyResolver(ImmutableList.of(fakeDeps1), false);
     Collection<String> deps = resolver.getDependencies(
         "goog.require('foo');goog.require('d');", seen, false);
 
-    assertEquals("b.js,a.js,c.js,d.js", Joiner.on(",").useForNull("null").join(deps));
+    assertThat(Joiner.on(",").useForNull("null").join(deps)).isEqualTo("b.js,a.js,c.js,d.js");
   }
 
-  public void testNonExistantProvideStrict() throws Exception {
-    Set<String> seen = Sets.newHashSet();
+  public void testNonExistentProvideStrict() throws Exception {
+    Set<String> seen = new HashSet<>();
     resolver = new DefaultDependencyResolver(ImmutableList.of(fakeDeps1), true);
     try {
       Collection<String> deps = resolver.getDependencies(

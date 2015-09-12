@@ -16,6 +16,8 @@
 
 package com.google.debugging.sourcemap;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
@@ -27,7 +29,7 @@ import java.util.Map;
  * Tests for {@link SourceMapConsumerV3}
  *
  */
-public class SourceMapConsumerV3Test extends TestCase {
+public final class SourceMapConsumerV3Test extends TestCase {
 
   public void testSources() throws Exception{
     String sourceMap =  "{\n" +
@@ -42,11 +44,8 @@ public class SourceMapConsumerV3Test extends TestCase {
     SourceMapConsumerV3 consumer = new SourceMapConsumerV3();
     consumer.parse(sourceMap);
 
-    String[] sources = (String[]) consumer.getOriginalSources().toArray();
-
-    assertEquals(1, sources.length);
-    assertEquals(null, consumer.getSourceRoot());
-    assertEquals("testcode", sources[0]);
+    assertThat(consumer.getOriginalSources()).containsExactly("testcode");
+    assertThat(consumer.getSourceRoot()).isNull();
   }
 
   public void testMap() throws Exception{
@@ -89,12 +88,9 @@ public class SourceMapConsumerV3Test extends TestCase {
     SourceMapConsumerV3 consumer = new SourceMapConsumerV3();
     consumer.parse(sourceMap);
 
-    String[] sources = (String[]) consumer.getOriginalSources().toArray();
-
-    assertEquals(1, sources.length);
-    assertEquals("http://server/path/", consumer.getSourceRoot());
     //By default sourceRoot is not prepended
-    assertEquals("testcode", sources[0]);
+    assertThat(consumer.getOriginalSources()).containsExactly("testcode");
+    assertThat(consumer.getSourceRoot()).isEqualTo("http://server/path/");
   }
 
   public void testExtensions() throws Exception{
@@ -114,10 +110,9 @@ public class SourceMapConsumerV3Test extends TestCase {
 
     Map<String, Object> exts = consumer.getExtensions();
 
-    assertEquals(2, exts.size());
-    assertFalse(exts.containsKey("org_int"));
-    assertEquals(2, ((JsonElement) exts.get("x_org_int")).getAsInt());
-    assertEquals(0, ((JsonArray) exts.get("x_org_array")).size());
+    assertThat(exts).hasSize(2);
+    assertThat(exts).doesNotContainKey("org_int");
+    assertThat(((JsonElement) exts.get("x_org_int")).getAsInt()).isEqualTo(2);
+    assertThat(((JsonArray) exts.get("x_org_array")).size()).isEqualTo(0);
   }
-
 }

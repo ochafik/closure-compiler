@@ -143,7 +143,7 @@ class ExpressionDecomposer {
    * The following terms are used:
    *    expressionRoot: The top-level node before which the any extracted
    *                    expressions should be placed before.
-   *    nonconditionalExpr: The node that will be extracted either expres.
+   *    nonconditionalExpr: The node that will be extracted either express.
    *
    */
   private void exposeExpression(Node expressionRoot, Node subExpression) {
@@ -385,11 +385,11 @@ class ExpressionDecomposer {
     } else {
       ifNode = IR.ifNode(cond, trueExpr);
     }
-    ifNode.copyInformationFrom(expr);
+    ifNode.useSourceInfoIfMissingFrom(expr);
 
     if (needResult) {
       Node tempVarNode = NodeUtil.newVarNode(tempName, null)
-          .copyInformationFromForTree(expr);
+          .useSourceInfoIfMissingFromForTree(expr);
       Node injectionPointParent = injectionPoint.getParent();
       injectionPointParent.addChildBefore(tempVarNode, injectionPoint);
       injectionPointParent.addChildAfter(ifNode, tempVarNode);
@@ -401,8 +401,8 @@ class ExpressionDecomposer {
       // Only conditionals that are the direct child of an expression statement
       // don't need results, for those simply replace the expression statement.
       Preconditions.checkArgument(parent.isExprResult());
-      Node gramps = parent.getParent();
-      gramps.replaceChild(parent, ifNode);
+      Node grandparent = parent.getParent();
+      grandparent.replaceChild(parent, ifNode);
     }
 
     return ifNode;
@@ -478,7 +478,7 @@ class ExpressionDecomposer {
       Preconditions.checkState(expr.isName() || NodeUtil.isGet(expr));
       // Transform "x += 2" into "x = temp + 2"
       Node opNode = new Node(NodeUtil.getOpFromAssignmentOp(parent))
-          .copyInformationFrom(parent);
+          .useSourceInfoIfMissingFrom(parent);
 
       Node rightOperand = parent.getLastChild();
 
@@ -653,8 +653,8 @@ class ExpressionDecomposer {
   }
 
   /**
-   * @return The statement containing the expression. null if subExpression
-   *     is not contain by in by a Node where inlining is known to be possible.
+   * @return The statement containing the expression or null if the subExpression
+   *     is not contain in a Node where inlining is known to be possible.
    *     For example, a WHILE node condition expression.
    */
   static Node findExpressionRoot(Node subExpression) {
@@ -670,10 +670,15 @@ class ExpressionDecomposer {
         case Token.IF:
         case Token.SWITCH:
         case Token.RETURN:
+        case Token.THROW:
         case Token.VAR:
           Preconditions.checkState(child == parent.getFirstChild());
           return parent;
         // Any of these indicate an unsupported expression:
+        case Token.FOR:
+          if (!NodeUtil.isForIn(parent) && child == parent.getFirstChild()) {
+            return parent;
+          }
         case Token.SCRIPT:
         case Token.BLOCK:
         case Token.LABEL:

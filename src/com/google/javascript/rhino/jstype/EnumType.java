@@ -65,7 +65,7 @@ public class EnumType extends PrototypeObjectType {
   // the type of the individual elements
   private EnumElementType elementsType;
   // the elements' names (they all have the same type)
-  private final Set<String> elements = new HashSet<String>();
+  private final Set<String> elements = new HashSet<>();
 
   /**
    * Creates an enum type.
@@ -135,9 +135,15 @@ public class EnumType extends PrototypeObjectType {
 
   @Override
   public boolean isSubtype(JSType that) {
+    return isSubtype(that, ImplCache.create());
+  }
+
+  @Override
+  protected boolean isSubtype(JSType that,
+      ImplCache implicitImplCache) {
     return that.isEquivalentTo(getNativeType(JSTypeNative.OBJECT_TYPE)) ||
         that.isEquivalentTo(getNativeType(JSTypeNative.OBJECT_PROTOTYPE)) ||
-        JSType.isSubtypeHelper(this, that);
+        JSType.isSubtypeHelper(this, that, implicitImplCache);
   }
 
   @Override
@@ -180,7 +186,7 @@ public class EnumType extends PrototypeObjectType {
   }
 
   @Override
-  JSType resolveInternal(ErrorReporter t, StaticScope<JSType> scope) {
+  JSType resolveInternal(ErrorReporter t, StaticTypedScope<JSType> scope) {
     elementsType = (EnumElementType) elementsType.resolve(t, scope);
     return super.resolveInternal(t, scope);
   }

@@ -16,7 +16,9 @@
 
 package com.google.javascript.jscomp;
 
-import com.google.common.collect.Maps;
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+import com.google.common.annotations.GwtIncompatible;
 import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.Node;
@@ -30,6 +32,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -42,6 +45,7 @@ import java.util.zip.CRC32;
  * or occur on codepaths that get executed frequently.
  *
  */
+@GwtIncompatible("java.util.regex")
 class AliasStrings extends AbstractPostOrderCallback
     implements CompilerPass {
 
@@ -66,7 +70,7 @@ class AliasStrings extends AbstractPostOrderCallback
 
   private final boolean outputStringUsage;
 
-  private final SortedMap<String, StringInfo> stringInfoMap = Maps.newTreeMap();
+  private final SortedMap<String, StringInfo> stringInfoMap = new TreeMap<>();
 
   private final Set<String> usedHashedAliases = new LinkedHashSet<>();
 
@@ -113,7 +117,7 @@ class AliasStrings extends AbstractPostOrderCallback
     logger.fine("Aliasing common strings");
 
     // Traverse the tree and collect strings
-    NodeTraversal.traverse(compiler, root, this);
+    NodeTraversal.traverseEs6(compiler, root, this);
 
     // 1st edit pass: replace some strings with aliases
     replaceStringsWithAliases();
@@ -152,7 +156,7 @@ class AliasStrings extends AbstractPostOrderCallback
         info.occurrences.add(occurrence);
         info.numOccurrences++;
 
-        if (t.inGlobalScope() || isInThrowExpression(n)) {
+        if (t.inGlobalHoistScope() || isInThrowExpression(n)) {
           info.numOccurrencesInfrequentlyExecuted++;
         }
 
@@ -439,7 +443,7 @@ class AliasStrings extends AbstractPostOrderCallback
       // The identifier is not unique because we omitted part, so add a
       // checksum as a hashcode.
       CRC32 crc32 = new CRC32();
-      crc32.update(s.getBytes());
+      crc32.update(s.getBytes(UTF_8));
       long hash = crc32.getValue() & unitTestHashReductionMask;
       sb.append('_');
       sb.append(Long.toHexString(hash));

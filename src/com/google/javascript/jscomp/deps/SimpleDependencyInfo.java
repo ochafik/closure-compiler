@@ -16,6 +16,7 @@
 
 package com.google.javascript.jscomp.deps;
 
+import com.google.javascript.jscomp.parsing.parser.util.format.SimpleFormat;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -27,7 +28,7 @@ import java.util.Objects;
  *
  * @author agrieve@google.com (Andrew Grieve)
  */
-public class SimpleDependencyInfo implements DependencyInfo {
+public final class SimpleDependencyInfo implements DependencyInfo {
 
   /** A list of provided symbols. */
   private final List<String> provides;
@@ -105,7 +106,7 @@ public class SimpleDependencyInfo implements DependencyInfo {
 
   @Override
   public String toString() {
-    return String.format("DependencyInfo(relativePath='%1$s', path='%2$s', "
+    return SimpleFormat.format("DependencyInfo(relativePath='%1$s', path='%2$s', "
         + "provides=%3$s, requires=%4$s, module=%5$b)", srcPathRelativeToClosure,
         pathOfDefiningFile, provides, requires, isModule);
   }

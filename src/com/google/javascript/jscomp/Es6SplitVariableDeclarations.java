@@ -37,7 +37,7 @@ import com.google.javascript.rhino.Node;
  *
  * @author tbreisacher@google.com (Tyler Breisacher)
  */
-public class Es6SplitVariableDeclarations extends
+public final class Es6SplitVariableDeclarations extends
     NodeTraversal.AbstractPostOrderCallback implements HotSwapCompilerPass {
   private final AbstractCompiler compiler;
   public Es6SplitVariableDeclarations(AbstractCompiler compiler) {
@@ -46,12 +46,13 @@ public class Es6SplitVariableDeclarations extends
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, root, this);
+    NodeTraversal.traverseEs6(compiler, externs, this);
+    NodeTraversal.traverseEs6(compiler, root, this);
   }
 
   @Override
   public void hotSwapScript(Node scriptRoot, Node originalRoot) {
-    NodeTraversal.traverse(compiler, scriptRoot, this);
+    NodeTraversal.traverseEs6(compiler, scriptRoot, this);
   }
 
   @Override

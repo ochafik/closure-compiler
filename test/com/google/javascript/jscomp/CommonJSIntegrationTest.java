@@ -23,7 +23,7 @@ package com.google.javascript.jscomp;
  * @author nicholas.j.santos@gmail.com (Nick Santos)
  */
 
-public class CommonJSIntegrationTest extends IntegrationTestCase {
+public final class CommonJSIntegrationTest extends IntegrationTestCase {
   public void testCrossModuleCtorCall() {
     test(createCompilerOptions(),
          new String[] {
@@ -252,8 +252,8 @@ public class CommonJSIntegrationTest extends IntegrationTestCase {
     CompilerOptions options = new CompilerOptions();
     options.setCodingConvention(new GoogleCodingConvention());
     WarningLevel.VERBOSE.setOptionsForWarningLevel(options);
-    options.processCommonJSModules = true;
-    options.closurePass = true;
+    options.setProcessCommonJSModules(true);
+    options.setClosurePass(true);
     return options;
   }
 }

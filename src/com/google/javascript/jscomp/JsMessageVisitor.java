@@ -16,18 +16,17 @@
 
 package com.google.javascript.jscomp;
 
-import static com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
-
+import com.google.common.annotations.GwtIncompatible;
 import com.google.common.base.CaseFormat;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.google.debugging.sourcemap.proto.Mapping.OriginalMapping;
 import com.google.javascript.jscomp.JsMessage.Builder;
-import com.google.javascript.jscomp.Scope.Var;
+import com.google.javascript.jscomp.NodeTraversal.AbstractPostOrderCallback;
+import com.google.javascript.jscomp.parsing.parser.util.format.SimpleFormat;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -41,7 +40,8 @@ import javax.annotation.Nullable;
  *
  * @author anatol@google.com (Anatol Pomazau)
  */
-abstract class JsMessageVisitor extends AbstractPostOrderCallback
+@GwtIncompatible("JsMessage, java.util.regex")
+public abstract class JsMessageVisitor extends AbstractPostOrderCallback
     implements CompilerPass {
 
   private static final String MSG_FUNCTION_NAME = "goog.getMsg";
@@ -75,12 +75,12 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
           "() function could be used only with MSG_* property or variable");
 
   static final DiagnosticType MESSAGE_NOT_INITIALIZED_USING_NEW_SYNTAX =
-      DiagnosticType.error("JSC_MSG_NOT_INITIALIZED_USING_NEW_SYNTAX",
+      DiagnosticType.warning("JSC_MSG_NOT_INITIALIZED_USING_NEW_SYNTAX",
           "message not initialized using " + MSG_FUNCTION_NAME);
 
   static final DiagnosticType BAD_FALLBACK_SYNTAX =
       DiagnosticType.error("JSC_MSG_BAD_FALLBACK_SYNTAX",
-          String.format(
+          SimpleFormat.format(
               "Bad syntax. " +
               "Expected syntax: %s(MSG_1, MSG_2)",
               MSG_FALLBACK_FUNCTION_NAME));
@@ -141,10 +141,10 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
    * use it for tracking duplicated message ids in the source code.
    */
   private final Map<String, MessageLocation> messageNames =
-      Maps.newHashMap();
+       new HashMap<>();
 
   private final Map<Var, JsMessage> unnamedMessages =
-      Maps.newHashMap();
+       new HashMap<>();
 
   /**
    * List of found goog.getMsg call nodes.
@@ -168,7 +168,7 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
    * @param idGenerator generator that used for creating unique ID for the
    *        message
    */
-  JsMessageVisitor(AbstractCompiler compiler,
+  protected JsMessageVisitor(AbstractCompiler compiler,
       boolean needToCheckDuplications,
       JsMessage.Style style, JsMessage.IdGenerator idGenerator) {
 
@@ -187,7 +187,7 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, root, this);
+    NodeTraversal.traverseEs6(compiler, root, this);
 
     for (Node msgNode : googMsgNodes) {
       compiler.report(JSError.make(msgNode,
@@ -227,6 +227,16 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
         messageKey = propNode.getString();
         msgNode = node.getLastChild();
         break;
+
+      case Token.STRING_KEY:
+        if (node.isQuotedString() || node.getFirstChild() == null) {
+          return;
+        }
+        isVar = false;
+        messageKey = node.getString();
+        msgNode = node.getFirstChild();
+        break;
+
       case Token.CALL:
         // goog.getMsg()
         if (node.getFirstChild().matchesQualifiedName(MSG_FUNCTION_NAME)) {
@@ -253,13 +263,19 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
       return;
     }
 
-    // Just report a warning if a qualified messageKey that looks like a message
+    // Report a warning if a qualified messageKey that looks like a message
     // (e.g. "a.b.MSG_X") doesn't use goog.getMsg().
     if (isNewStyleMessage) {
       googMsgNodes.remove(msgNode);
     } else if (style != JsMessage.Style.LEGACY) {
-      compiler.report(traversal.makeError(node, checkLevel,
+      // TODO(johnlenz): promote this to an error once existing conflicts have been
+      // cleaned up.
+      compiler.report(traversal.makeError(node,
           MESSAGE_NOT_INITIALIZED_USING_NEW_SYNTAX));
+      if (style == JsMessage.Style.CLOSURE) {
+        // Don't extract the message if we aren't accepting LEGACY messages
+        return;
+      }
     }
 
     boolean isUnnamedMsg = isUnnamedMessageName(messageKey);
@@ -569,7 +585,7 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
    */
   private void extractFromFunctionNode(Builder builder, Node node)
       throws MalformedException {
-    Set<String> phNames = Sets.newHashSet();
+    Set<String> phNames = new HashSet<>();
 
     for (Node fnChild : node.children()) {
       switch (fnChild.getType()) {
@@ -699,7 +715,7 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
     parseMessageTextNode(builder, stringLiteralNode);
 
     Node objLitNode = stringLiteralNode.getNext();
-    Set<String> phNames = Sets.newHashSet();
+    Set<String> phNames = new HashSet<>();
     if (objLitNode != null) {
       // Register the placeholder names
       if (!objLitNode.isObjectLit()) {
@@ -733,7 +749,7 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
       if (!phNames.contains(phName)) {
         throw new MalformedException(
             "Unrecognized message placeholder referenced: " + phName,
-            objLitNode);
+            node);
       }
     }
 
@@ -743,7 +759,7 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
       if (!usedPlaceholders.contains(phName)) {
         throw new MalformedException(
             "Unused message placeholder: " + phName,
-            objLitNode);
+            node);
       }
     }
   }
@@ -842,7 +858,7 @@ abstract class JsMessageVisitor extends AbstractPostOrderCallback
    * @param definition the definition of the object and usually contains all
    *        additional message information like message node/parent's node
    */
-  abstract void processJsMessage(JsMessage message,
+  protected abstract void processJsMessage(JsMessage message,
       JsMessageDefinition definition);
 
   /**

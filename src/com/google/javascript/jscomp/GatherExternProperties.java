@@ -33,6 +33,8 @@ import com.google.javascript.rhino.jstype.TemplateType;
 import com.google.javascript.rhino.jstype.TemplatizedType;
 import com.google.javascript.rhino.jstype.UnionType;
 import com.google.javascript.rhino.jstype.Visitor;
+
+import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -40,21 +42,18 @@ import java.util.Set;
  */
 class GatherExternProperties extends AbstractPostOrderCallback
     implements CompilerPass {
-  private final Set<String> externProperties = Sets.newHashSet();
+  private final Set<String> externProperties = new HashSet<>();
   private final AbstractCompiler compiler;
-  private final boolean gatherPropertiesFromTypes;
   private final ExtractRecordTypePropertyNames typeVisitor =
       new ExtractRecordTypePropertyNames();
 
-  public GatherExternProperties(AbstractCompiler compiler,
-      boolean gatherPropertiesFromTypes) {
+  public GatherExternProperties(AbstractCompiler compiler) {
     this.compiler = compiler;
-    this.gatherPropertiesFromTypes = gatherPropertiesFromTypes;
   }
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, externs, this);
+    NodeTraversal.traverseEs6(compiler, externs, this);
     compiler.setExternProperties(ImmutableSet.copyOf(externProperties));
   }
 
@@ -78,26 +77,23 @@ class GatherExternProperties extends AbstractPostOrderCallback
         break;
     }
 
-    if (gatherPropertiesFromTypes) {
-      // Gather field names from the type of the node (if any).
-      JSType type = n.getJSType();
-      if (type != null) {
-        typeVisitor.visitOnce(type);
-      }
+    // Gather field names from the type of the node (if any).
+    JSType type = n.getJSType();
+    if (type != null) {
+      typeVisitor.visitOnce(type);
+    }
 
-      // Gather field names from the @typedef declaration.
-      // Typedefs are declared on qualified name nodes.
-      if (n.isQualifiedName()) {
-        // Get the JSDoc for the current node and check if it contains a
-        // typedef.
-        JSDocInfo jsDoc = NodeUtil.getBestJSDocInfo(n);
-        if (jsDoc != null && jsDoc.hasTypedefType()) {
-          // Get the corresponding type by looking at the type registry.
-          JSType typedefType =
-              compiler.getTypeRegistry().getType(n.getQualifiedName());
-          if (typedefType != null) {
-            typeVisitor.visitOnce(typedefType);
-          }
+    // Gather field names from the @typedef declaration.
+    // Typedefs are declared on qualified name nodes.
+    if (n.isQualifiedName()) {
+      // Get the JSDoc for the current node and check if it contains a
+      // typedef.
+      JSDocInfo jsDoc = NodeUtil.getBestJSDocInfo(n);
+      if (jsDoc != null && jsDoc.hasTypedefType()) {
+        // Get the corresponding type by looking at the type registry.
+        JSType typedefType = compiler.getTypeIRegistry().getType(n.getQualifiedName());
+        if (typedefType != null) {
+          typeVisitor.visitOnce(typedefType);
         }
       }
     }
@@ -109,14 +105,14 @@ class GatherExternProperties extends AbstractPostOrderCallback
 
     public void visitOnce(JSType type) {
       // Handle recursive types by only ever visiting the same type once.
-      if (!seenTypes.contains(type)) {
-        seenTypes.add(type);
+      if (seenTypes.add(type)) {
         type.visit(this);
       }
     }
 
     // Interesting cases first, no-ops later.
 
+    @Override
     public Set<String> caseEnumElementType(EnumElementType type) {
       // Descend into the enum's element type.
       // @enum {T}
@@ -125,6 +121,7 @@ class GatherExternProperties extends AbstractPostOrderCallback
       return externProperties;
     }
 
+    @Override
     public Set<String> caseFunctionType(FunctionType type) {
       // Visit parameter types.
       // function(T1, T2), as well as @param {T}
@@ -163,6 +160,7 @@ class GatherExternProperties extends AbstractPostOrderCallback
       return externProperties;
     }
 
+    @Override
     public Set<String> caseObjectType(ObjectType type) {
       // Record types.
       // {a: T1, b: T2}.
@@ -182,11 +180,13 @@ class GatherExternProperties extends AbstractPostOrderCallback
       return externProperties;
     }
 
+    @Override
     public Set<String> caseNamedType(NamedType type) {
       // Treat as all other proxy objects.
       return caseProxyObjectType(type);
     }
 
+    @Override
     public Set<String> caseProxyObjectType(ProxyObjectType type) {
       // Visit the proxied type.
       // @typedef {T}
@@ -195,6 +195,7 @@ class GatherExternProperties extends AbstractPostOrderCallback
       return externProperties;
     }
 
+    @Override
     public Set<String> caseUnionType(UnionType type) {
       // Visit the alternatives.
       // T1|T2|T3
@@ -204,6 +205,7 @@ class GatherExternProperties extends AbstractPostOrderCallback
       return externProperties;
     }
 
+    @Override
     public Set<String> caseTemplatizedType(TemplatizedType type) {
       // Visit the type arguments.
       // SomeType.<T1, T2>
@@ -213,45 +215,54 @@ class GatherExternProperties extends AbstractPostOrderCallback
       return externProperties;
     }
 
+    @Override
     public Set<String> caseNoType(NoType type) {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseAllType() {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseBooleanType() {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseNoObjectType() {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseUnknownType() {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseNullType() {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseNumberType() {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseStringType() {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseVoidType() {
       return externProperties;
     }
 
+    @Override
     public Set<String> caseTemplateType(TemplateType templateType) {
       return externProperties;
     }
   }
 }
-

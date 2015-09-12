@@ -26,7 +26,9 @@ import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Converts ES6 generator functions to valid ES3 code. This pass runs after all ES6 features
@@ -34,7 +36,8 @@ import java.util.List;
  *
  * @author mattloring@google.com (Matthew Loring)
  */
-public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapCompilerPass {
+public final class Es6RewriteGenerators extends NodeTraversal.AbstractPostOrderCallback
+    implements HotSwapCompilerPass {
   private final AbstractCompiler compiler;
 
   // The current case statement onto which translated statements from the
@@ -49,8 +52,6 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
 
   // The current statement being translated.
   private Node currentStatement;
-
-  private static final String ITER_KEY = "$$iterator";
 
   // The name of the variable that holds the state at which the generator
   // should resume execution after a call to yield or return.
@@ -108,53 +109,14 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
 
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverse(compiler, root, this);
+    NodeTraversal.traverseEs6(compiler, root, new DecomposeYields(compiler));
+    NodeTraversal.traverseEs6(compiler, root, this);
   }
 
   @Override
   public void hotSwapScript(Node scriptRoot, Node originalRoot) {
-    NodeTraversal.traverse(compiler, scriptRoot, this);
-  }
-
-  @Override
-  public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
-    Node enclosing = NodeUtil.getEnclosingFunction(n);
-    if (enclosing == null || !enclosing.isGeneratorFunction()
-        || !NodeUtil.isLoopStructure(n) || NodeUtil.isForIn(n)) {
-      return true;
-    }
-    Node guard = null, incr = null;
-    switch (n.getType()) {
-      case Token.FOR:
-        guard = n.getFirstChild().getNext();
-        incr = guard.getNext();
-        break;
-      case Token.WHILE:
-        guard = n.getFirstChild();
-        incr = IR.empty();
-        break;
-      case Token.DO:
-        guard = n.getLastChild();
-        incr = IR.empty();
-        break;
-    }
-    if (!controlCanExit(guard) && !controlCanExit(incr)) {
-      return true;
-    }
-    Node guardName = IR.name(GENERATOR_LOOP_GUARD + generatorCounter.get());
-    if (!guard.isEmpty()) {
-      Node container = new Node(Token.BLOCK);
-      n.replaceChild(guard, container);
-      container.addChildToFront(IR.block(IR.exprResult(IR.assign(
-        guardName.cloneTree(), guard.cloneTree()))));
-      container.addChildToBack(guardName.cloneTree());
-    }
-    if (!incr.isEmpty()) {
-      n.addChildBefore(IR.block(IR.exprResult(incr.detachFromParent())), n.getLastChild());
-    }
-    Node block = NodeUtil.getEnclosingType(n, Token.BLOCK);
-    block.addChildToFront(IR.var(guardName));
-    return true;
+    NodeTraversal.traverseEs6(compiler, scriptRoot, new DecomposeYields(compiler));
+    NodeTraversal.traverseEs6(compiler, scriptRoot, this);
   }
 
   @Override
@@ -267,6 +229,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
   }
 
   private void visitGenerator(Node n, Node parent) {
+    compiler.needsEs6Runtime = true;
     hasTranslatedTry = false;
     Node genBlock = compiler.parseSyntheticCode(Joiner.on('\n').join(
       "function generatorBody() {",
@@ -279,11 +242,13 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
       "        return {value: undefined, done: true};",
       "    }",
       "  }",
-      "  return {",
-      "    " + ITER_KEY + ": function() { return this; },",
+      "  var iterator = {",
       "    next: function(arg){ return $jscomp$generator$impl(arg, undefined); },",
       "    throw: function(arg){ return $jscomp$generator$impl(undefined, arg); },",
-      "  }",
+      "  };",
+      "  $jscomp.initSymbolIterator();",
+      "  iterator[Symbol.iterator] = function() {return this;};",
+      "  return iterator;",
       "}"
     )).getFirstChild().getLastChild().detachFromParent();
     generatorCaseCount++;
@@ -294,24 +259,18 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
 
     //TODO(mattloring): remove this suppression once we can optimize the switch statement to
     // remove unused cases.
-    JSDocInfoBuilder builder;
-    if (n.getJSDocInfo() == null) {
-      builder = new JSDocInfoBuilder(true);
-    } else {
-      builder = JSDocInfoBuilder.copyFrom(n.getJSDocInfo());
-    }
+    JSDocInfoBuilder builder = JSDocInfoBuilder.maybeCopyFrom(n.getJSDocInfo());
     //TODO(mattloring): copy existing suppressions.
     builder.recordSuppressions(ImmutableSet.of("uselessCode"));
-    JSDocInfo info = builder.build(n);
+    JSDocInfo info = builder.build();
     n.setJSDocInfo(info);
-
 
     // Set state to the default after the body of the function has completed.
     originalGeneratorBody.addChildToBack(
         IR.exprResult(IR.assign(IR.name(GENERATOR_STATE), IR.number(-1))));
 
     enclosingBlock = getUnique(genBlock, Token.CASE).getLastChild();
-    hoistRoot = getUnique(genBlock, Token.VAR);
+    hoistRoot = genBlock.getFirstChild();
 
     if (NodeUtil.isNameReferenced(originalGeneratorBody, GENERATOR_ARGUMENTS)) {
       hoistRoot.getParent().addChildAfter(
@@ -329,7 +288,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
       if (advanceCase) {
         int caseNumber;
         if (currentStatement.isGeneratorMarker()) {
-          caseNumber = (int) currentStatement.getDouble();
+          caseNumber = (int) currentStatement.getFirstChild().getDouble();
         } else {
           caseNumber = generatorCaseCount;
           generatorCaseCount++;
@@ -448,8 +407,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
     }
     Node finallyBody = catchBlock.getNext();
     int catchStartState = generatorCaseCount++;
-    Node catchStart = IR.number(catchStartState);
-    catchStart.setGeneratorMarker(true);
+    Node catchStart = makeGeneratorMarker(catchStartState);
 
     Node errorNameGenerated = IR.name("$jscomp$generator$" + caughtError.getString());
 
@@ -466,16 +424,14 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
     if (finallyBody != null) {
       Node finallyName = IR.name(GENERATOR_FINALLY_JUMP + generatorCounter.get());
       int finallyStartState = generatorCaseCount++;
-      Node finallyStart = IR.number(finallyStartState);
-      finallyStart.setGeneratorMarker(true);
+      Node finallyStart = makeGeneratorMarker(finallyStartState);
       int finallyEndState = generatorCaseCount++;
-      Node finallyEnd = IR.number(finallyEndState);
-      finallyEnd.setGeneratorMarker(true);
+      Node finallyEnd = makeGeneratorMarker(finallyEndState);
 
-      NodeTraversal.traverse(compiler,
+      NodeTraversal.traverseEs6(compiler,
           tryBody,
           new ControlExitsCheck(finallyName, finallyStartState));
-      NodeTraversal.traverse(compiler, catchBody,
+      NodeTraversal.traverseEs6(compiler, catchBody,
           new ControlExitsCheck(finallyName, finallyStartState));
       originalGeneratorBody.addChildToFront(tryBody.detachFromParent());
 
@@ -495,8 +451,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
           IR.assign(finallyName.cloneTree(), IR.number(finallyEndState))));
     } else {
       int catchEndState = generatorCaseCount++;
-      Node catchEnd = IR.number(catchEndState);
-      catchEnd.setGeneratorMarker(true);
+      Node catchEnd = makeGeneratorMarker(catchEndState);
       originalGeneratorBody.addChildAfter(catchEnd, catchBody);
       tryBody.addChildToBack(createStateUpdate(catchEndState));
       tryBody.addChildToBack(createSafeBreak());
@@ -572,11 +527,12 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
    */
   private void visitGeneratorMarker() {
     if (!currentLoopContext.isEmpty()
-        && currentLoopContext.get(0).breakCase == currentStatement.getDouble()) {
+        && currentLoopContext.get(0).breakCase == currentStatement.getFirstChild().getDouble()) {
       currentLoopContext.remove(0);
     }
     if (!currentExceptionContext.isEmpty()
-        && currentExceptionContext.get(0).catchStartCase == currentStatement.getDouble()) {
+        && currentExceptionContext.get(0).catchStartCase
+            == currentStatement.getFirstChild().getDouble()) {
       currentExceptionContext.remove(0);
     }
   }
@@ -596,8 +552,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
     Node invertedConditional = IR.ifNode(IR.not(condition),
         IR.block(createStateUpdate(ifEndState), createSafeBreak()));
     invertedConditional.setGeneratorSafe(true);
-    Node endIf = IR.number(ifEndState);
-    endIf.setGeneratorMarker(true);
+    Node endIf = makeGeneratorMarker(ifEndState);
 
     originalGeneratorBody.addChildToFront(invertedConditional);
     originalGeneratorBody.addChildAfter(ifBody, invertedConditional);
@@ -608,8 +563,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
 
       int elseEndState = generatorCaseCount++;
 
-      Node endElse = IR.number(elseEndState);
-      endElse.setGeneratorMarker(true);
+      Node endElse = makeGeneratorMarker(elseEndState);
 
       ifBody.addChildToBack(createStateUpdate(elseEndState));
       ifBody.addChildToBack(createSafeBreak());
@@ -679,8 +633,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
     int breakTarget = generatorCaseCount++;
     int cont = currentLoopContext.isEmpty() ? -1 : currentLoopContext.get(0).continueCase;
     currentLoopContext.add(0, new LoopContext(breakTarget, cont, null));
-    Node breakCase = IR.number(breakTarget);
-    breakCase.setGeneratorMarker(true);
+    Node breakCase = makeGeneratorMarker(breakTarget);
     originalGeneratorBody.addChildAfter(breakCase, insertionPoint);
   }
 
@@ -797,12 +750,8 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
     Node incr;
     Node body;
 
-    // Used only in the case of DO loops.
-    Node firstEntry;
-
     if (currentStatement.isWhile()) {
       guard = currentStatement.removeFirstChild();
-      firstEntry = null;
       body = currentStatement.removeFirstChild();
       initializer = IR.empty();
       incr = IR.empty();
@@ -812,14 +761,12 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
         initializer = IR.exprResult(initializer);
       }
       guard = currentStatement.removeFirstChild();
-      firstEntry = null;
       incr = currentStatement.removeFirstChild();
       body = currentStatement.removeFirstChild();
     } else {
       Preconditions.checkState(currentStatement.isDo());
-      firstEntry = IR.name(GENERATOR_DO_WHILE_INITIAL);
-      initializer = IR.var(firstEntry.cloneTree(), IR.trueNode());
-      incr = IR.assign(firstEntry.cloneTree(), IR.falseNode());
+      initializer = IR.empty();
+      incr = IR.assign(IR.name(GENERATOR_DO_WHILE_INITIAL), IR.falseNode());
 
       body = currentStatement.removeFirstChild();
       guard = currentStatement.removeFirstChild();
@@ -835,25 +782,19 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
       condition = guard;
     }
 
-    if (currentStatement.isDo()) {
-      condition = IR.or(firstEntry, condition);
-    }
-
     int loopBeginState = generatorCaseCount++;
     int continueState = loopBeginState;
 
     if (!incr.isEmpty()) {
       continueState = generatorCaseCount++;
-      Node continueCase = IR.number(continueState);
-      continueCase.setGeneratorMarker(true);
+      Node continueCase = makeGeneratorMarker(continueState);
       body.addChildToBack(continueCase);
       body.addChildToBack(incr.isBlock() ? incr : IR.exprResult(incr));
     }
 
     currentLoopContext.add(0, new LoopContext(generatorCaseCount, continueState, label));
 
-    Node beginCase = IR.number(loopBeginState);
-    beginCase.setGeneratorMarker(true);
+    Node beginCase = makeGeneratorMarker(loopBeginState);
     Node conditionalBranch = IR.ifNode(condition.isEmpty() ? IR.trueNode() : condition, body);
     Node setStateLoopStart = createStateUpdate(loopBeginState);
     Node breakToStart = createSafeBreak();
@@ -872,7 +813,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
 
   /**
    * {@code var} statements are hoisted into the closure containing the iterator
-   * to preserve their state accross
+   * to preserve their state across
    * multiple calls to next().
    */
   private void visitVar() {
@@ -938,8 +879,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
     Node setReturnState =  IR.exprResult(
         IR.assign(finallyName.cloneTree(), IR.number(jumpPoint)));
     Node toFinally = createStateUpdate(finallyStartState);
-    Node returnPoint = IR.number(jumpPoint);
-    returnPoint.setGeneratorMarker(true);
+    Node returnPoint = makeGeneratorMarker(jumpPoint);
     Node returnBlock = IR.block(setReturnState, toFinally, createSafeBreak());
     returnBlock.addChildToBack(returnPoint);
     return returnBlock;
@@ -956,7 +896,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
 
   private boolean controlCanExit(Node n) {
     ControlExitsCheck exits = new ControlExitsCheck();
-    NodeTraversal.traverse(compiler, n, exits);
+    NodeTraversal.traverseEs6(compiler, n, exits);
     return exits.didExit();
   }
 
@@ -966,7 +906,7 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
   private Node getUnique(Node node, int type) {
     List<Node> matches = new ArrayList<>();
     insertAll(node, type, matches);
-    Preconditions.checkState(matches.size() == 1);
+    Preconditions.checkState(matches.size() == 1, matches);
     return matches.get(0);
   }
 
@@ -980,6 +920,130 @@ public class Es6RewriteGenerators implements NodeTraversal.Callback, HotSwapComp
     for (Node c = node.getFirstChild(); c != null; c = c.getNext()) {
       insertAll(c, type, matchingNodes);
     }
+  }
+
+  /**
+   * Decompose expressions with yields inside of them to equivalent
+   * sequence of expressions in which all non-statement yields are
+   * of the form:
+   * <pre>
+   *   var name = yield expr;
+   * </pre>
+   *
+   * For example, change the following code:
+   * <pre>
+   *   return x || yield y;
+   * </pre>
+   * into
+   * <pre>
+   *  var temp$$0;
+   *  if (temp$$0 = x); else temp$$0 = yield y;
+   *  return temp$$0
+   * </pre>
+   *
+   * This uses the {@link ExpressionDecomposer} class
+   */
+  class DecomposeYields extends NodeTraversal.AbstractPreOrderCallback {
+
+    private final AbstractCompiler compiler;
+
+    private final ExpressionDecomposer decomposer;
+
+    public DecomposeYields(AbstractCompiler compiler) {
+      this.compiler = compiler;
+      Set<String> consts = new HashSet<>();
+      decomposer = new ExpressionDecomposer(
+        compiler, compiler.getUniqueNameIdSupplier(), consts,
+          Scope.createGlobalScope(new Node(Token.SCRIPT)));
+    }
+
+    @Override
+    public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
+      switch (n.getType()) {
+        case Token.YIELD:
+          visitYieldExpression(n);
+          break;
+        case Token.DO:
+        case Token.FOR:
+        case Token.WHILE:
+          visitLoop(n);
+          break;
+        case Token.CASE:
+          if (controlCanExit(n.getFirstChild())) {
+            compiler.report(JSError.make(n, Es6ToEs3Converter.CANNOT_CONVERT_YET,
+              "Case statements that contain yields"));
+            return false;
+          }
+          break;
+      }
+      return true;
+    }
+
+    private void visitYieldExpression(Node n) {
+      if (n.getParent().isExprResult()) {
+        return;
+      }
+      if (decomposer.canExposeExpression(n)
+          != ExpressionDecomposer.DecompositionType.UNDECOMPOSABLE) {
+        decomposer.exposeExpression(n);
+        compiler.reportCodeChange();
+      } else {
+        compiler.report(JSError.make(n, Es6ToEs3Converter.CANNOT_CONVERT,
+          "Undecomposable expression"));
+      }
+    }
+
+    private void visitLoop(Node n) {
+      Node enclosingFunc = NodeUtil.getEnclosingFunction(n);
+      if (enclosingFunc  == null || !enclosingFunc.isGeneratorFunction()
+          || NodeUtil.isForIn(n)) {
+        return;
+      }
+      Node enclosingBlock = NodeUtil.getEnclosingType(n, Token.BLOCK);
+      Node guard = null, incr = null;
+      switch (n.getType()) {
+        case Token.FOR:
+          guard = n.getFirstChild().getNext();
+          incr = guard.getNext();
+          break;
+        case Token.WHILE:
+          guard = n.getFirstChild();
+          incr = IR.empty();
+          break;
+        case Token.DO:
+          guard = n.getLastChild();
+          if (!guard.isEmpty()) {
+            Node firstEntry = IR.name(GENERATOR_DO_WHILE_INITIAL);
+            enclosingBlock.addChildToFront(IR.var(firstEntry.cloneTree(), IR.trueNode()));
+            guard = IR.or(firstEntry, n.getLastChild().detachFromParent());
+            n.addChildToBack(guard);
+          }
+          incr = IR.empty();
+          break;
+      }
+      if (!controlCanExit(guard) && !controlCanExit(incr)) {
+        return;
+      }
+      Node guardName = IR.name(GENERATOR_LOOP_GUARD + generatorCounter.get());
+      if (!guard.isEmpty()) {
+        Node container = new Node(Token.BLOCK);
+        n.replaceChild(guard, container);
+        container.addChildToFront(IR.block(IR.exprResult(IR.assign(
+          guardName.cloneTree(), guard.cloneTree()))));
+        container.addChildToBack(guardName.cloneTree());
+      }
+      if (!incr.isEmpty()) {
+        n.addChildBefore(IR.block(IR.exprResult(incr.detachFromParent())), n.getLastChild());
+      }
+      enclosingBlock.addChildToFront(IR.var(guardName));
+      compiler.reportCodeChange();
+    }
+  }
+
+  private static Node makeGeneratorMarker(int i) {
+    Node n = IR.exprResult(IR.number(i));
+    n.setGeneratorMarker(true);
+    return n;
   }
 
   class ControlExitsCheck implements NodeTraversal.Callback {

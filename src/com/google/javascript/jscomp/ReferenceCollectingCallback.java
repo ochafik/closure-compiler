@@ -21,20 +21,18 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.NodeTraversal.ScopedCallback;
-import com.google.javascript.jscomp.Scope.Var;
 import com.google.javascript.rhino.InputId;
 import com.google.javascript.rhino.Node;
+import com.google.javascript.rhino.StaticRef;
+import com.google.javascript.rhino.StaticSourceFile;
+import com.google.javascript.rhino.StaticSymbolTable;
 import com.google.javascript.rhino.Token;
-import com.google.javascript.rhino.jstype.JSType;
-import com.google.javascript.rhino.jstype.StaticReference;
-import com.google.javascript.rhino.jstype.StaticSourceFile;
-import com.google.javascript.rhino.jstype.StaticSymbolTable;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -58,12 +56,12 @@ class ReferenceCollectingCallback implements ScopedCallback,
    * name).
    */
   private final Map<Var, ReferenceCollection> referenceMap =
-      Maps.newLinkedHashMap();
+       new LinkedHashMap<>();
 
   /**
    * The stack of basic blocks and scopes the current traversal is in.
    */
-  private List<BasicBlock> blockStack = Lists.newArrayList();
+  private List<BasicBlock> blockStack = new ArrayList<>();
 
   /**
    * Source of behavior at various points in the traversal.
@@ -84,8 +82,8 @@ class ReferenceCollectingCallback implements ScopedCallback,
    * Traverse hoisted functions where they're referenced, not
    * where they're declared.
    */
-  private final Set<Var> startedFunctionTraverse = Sets.newHashSet();
-  private final Set<Var> finishedFunctionTraverse = Sets.newHashSet();
+  private final Set<Var> startedFunctionTraverse = new HashSet<>();
+  private final Set<Var> finishedFunctionTraverse = new HashSet<>();
   private Scope narrowScope;
 
   /**
@@ -114,8 +112,7 @@ class ReferenceCollectingCallback implements ScopedCallback,
    */
   @Override
   public void process(Node externs, Node root) {
-    NodeTraversal.traverseRoots(
-        compiler, Lists.newArrayList(externs, root), this);
+    NodeTraversal.traverseRoots(compiler, this, externs, root);
   }
 
   /**
@@ -132,7 +129,7 @@ class ReferenceCollectingCallback implements ScopedCallback,
    */
   @Override
   public void hotSwapScript(Node scriptRoot, Node originalRoot) {
-    NodeTraversal.traverse(compiler, scriptRoot, this);
+    NodeTraversal.traverseEs6(compiler, scriptRoot, this);
   }
 
   /**
@@ -209,11 +206,12 @@ class ReferenceCollectingCallback implements ScopedCallback,
     // CollapseProperties.
     List<BasicBlock> newBlockStack = null;
     if (containingScope.isGlobal()) {
-      newBlockStack = Lists.newArrayList(blockStack.get(0));
+      newBlockStack = new ArrayList<>();
+      newBlockStack.add(blockStack.get(0));
     } else {
       for (int i = 0; i < blockStack.size(); i++) {
         if (blockStack.get(i).root == containingScope.getRootNode()) {
-          newBlockStack = Lists.newArrayList(blockStack.subList(0, i + 1));
+          newBlockStack = new ArrayList<>(blockStack.subList(0, i + 1));
         }
       }
     }
@@ -378,7 +376,7 @@ class ReferenceCollectingCallback implements ScopedCallback,
    */
   static class ReferenceCollection implements Iterable<Reference> {
 
-    List<Reference> references = Lists.newArrayList();
+    List<Reference> references = new ArrayList<>();
 
     @Override
     public Iterator<Reference> iterator() {
@@ -567,17 +565,14 @@ class ReferenceCollectingCallback implements ScopedCallback,
 
     boolean firstReferenceIsAssigningDeclaration() {
       int size = references.size();
-      if (size > 0 && references.get(0).isInitializingDeclaration()) {
-        return true;
-      }
-      return false;
+      return size > 0 && references.get(0).isInitializingDeclaration();
     }
   }
 
   /**
    * Represents a single declaration or reference to a variable.
    */
-  static final class Reference implements StaticReference<JSType> {
+  static final class Reference implements StaticRef {
 
     private static final Set<Integer> DECLARATION_PARENTS =
         ImmutableSet.of(Token.VAR, Token.LET, Token.CONST, Token.PARAM_LIST,
@@ -592,6 +587,11 @@ class ReferenceCollectingCallback implements ScopedCallback,
     Reference(Node nameNode, NodeTraversal t,
         BasicBlock basicBlock) {
       this(nameNode, basicBlock, t.getScope(), t.getInput().getInputId());
+    }
+
+    @Override
+    public String toString() {
+      return nameNode.toString();
     }
 
     /**
@@ -647,15 +647,24 @@ class ReferenceCollectingCallback implements ScopedCallback,
     private static boolean isDeclarationHelper(Node node) {
       Node parent = node.getParent();
 
-      // Special case for class B extends A, A is not a redeclaration.
+      // Special case for class B extends A, A is not a declaration.
       if (parent.isClass() && node != parent.getFirstChild()) {
+        return false;
+      }
+
+      // This condition can be true during InlineVariables.
+      if (parent.getParent() == null) {
         return false;
       }
 
       if (NodeUtil.isNameDeclaration(parent.getParent())
           && node == parent.getLastChild()) {
-        // This is the RHS of a var/let/const, so not a declaration.
-        return false;
+        // Unless it is something like "for (var/let/const a of x){}",
+        // this is the RHS of a var/let/const and thus not a declaration.
+        if (parent.getParent().getParent() == null
+            || !parent.getParent().getParent().isForOf()) {
+          return false;
+        }
       }
 
       // Special cases for destructuring patterns.
@@ -665,6 +674,11 @@ class ReferenceCollectingCallback implements ScopedCallback,
               && node == parent.getLastChild())
           || (parent.isDefaultValue() && node == parent.getFirstChild())) {
         return isDeclarationHelper(parent);
+      }
+
+      // Special case for arrow function
+      if (parent.isArrowFunction()) {
+        return node == parent.getFirstChild();
       }
 
       return DECLARATION_PARENTS.contains(parent.getType());
@@ -682,6 +696,10 @@ class ReferenceCollectingCallback implements ScopedCallback,
       return getParent().isConst();
     }
 
+    boolean isClassDeclaration() {
+      return getParent().isClass() && getNode() == getParent().getFirstChild();
+    }
+
     boolean isHoistedFunction() {
       return NodeUtil.isHoistedFunctionDeclaration(getParent());
     }
@@ -690,11 +708,10 @@ class ReferenceCollectingCallback implements ScopedCallback,
      * Determines whether the variable is initialized at the declaration.
      */
     boolean isInitializingDeclaration() {
-      // VAR is the only type of variable declaration that may not initialize
-      // its variable. Catch blocks, named functions, and parameters all do.
-      return isDeclaration() &&
-          !getParent().isVar() ||
-          nameNode.getFirstChild() != null;
+      // VAR and LET are the only types of variable declarations that may not initialize
+      // their variables. Catch blocks, named functions, and parameters all do.
+      return (isDeclaration() && !getParent().isVar() && !getParent().isLet())
+        || nameNode.getFirstChild() != null;
     }
 
    /**
@@ -720,12 +737,12 @@ class ReferenceCollectingCallback implements ScopedCallback,
       return parent == null ? null : parent.getParent();
     }
 
-    private static boolean isLhsOfForInExpression(Node n) {
+    private static boolean isLhsOfEnhancedForExpression(Node n) {
       Node parent = n.getParent();
-      if (parent.isVar()) {
-        return isLhsOfForInExpression(parent);
+      if (NodeUtil.isNameDeclaration(parent)) {
+        return isLhsOfEnhancedForExpression(parent);
       }
-      return NodeUtil.isForIn(parent) && parent.getFirstChild() == n;
+      return NodeUtil.isEnhancedFor(parent) && parent.getFirstChild() == n;
     }
 
     boolean isSimpleAssignmentToName() {
@@ -740,11 +757,13 @@ class ReferenceCollectingCallback implements ScopedCallback,
       return (parentType == Token.VAR && nameNode.getFirstChild() != null)
           || (parentType == Token.LET && nameNode.getFirstChild() != null)
           || (parentType == Token.CONST && nameNode.getFirstChild() != null)
+          || (parentType == Token.DEFAULT_VALUE && parent.getFirstChild() == nameNode)
           || parentType == Token.INC
           || parentType == Token.DEC
-          || (NodeUtil.isAssignmentOp(parent)
-              && parent.getFirstChild() == nameNode)
-          || isLhsOfForInExpression(nameNode);
+          || parentType == Token.CATCH
+          || (NodeUtil.isAssignmentOp(parent) && parent.getFirstChild() == nameNode)
+          || isLhsOfEnhancedForExpression(nameNode)
+          || NodeUtil.isLhsByDestructuring(nameNode);
     }
 
     Scope getScope() {
@@ -824,10 +843,7 @@ class ReferenceCollectingCallback implements ScopedCallback,
       if (currentBlock == this) {
         return true;
       }
-      if (isGlobalScopeBlock() && thatBlock.isGlobalScopeBlock()) {
-        return true;
-      }
-      return false;
+      return isGlobalScopeBlock() && thatBlock.isGlobalScopeBlock();
     }
   }
 }

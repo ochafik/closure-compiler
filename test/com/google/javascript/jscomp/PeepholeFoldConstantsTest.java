@@ -32,7 +32,7 @@ import java.util.Set;
  * {@link PeepholeIntegrationTest}.
  */
 
-public class PeepholeFoldConstantsTest extends CompilerTestCase {
+public final class PeepholeFoldConstantsTest extends CompilerTestCase {
 
   private boolean late;
 
@@ -48,7 +48,6 @@ public class PeepholeFoldConstantsTest extends CompilerTestCase {
   @Override
   public void setUp() {
     late = false;
-    enableLineNumberCheck(true);
   }
 
   @Override
@@ -430,6 +429,7 @@ public class PeepholeFoldConstantsTest extends CompilerTestCase {
     fold("x = 1 | 1.1", "x = 1");
     foldSame("x = 1 | 3E9");
     fold("x = 1 | 3000000001", "x = -1294967295");
+    fold("x = 4294967295 | 0", "x = -1");
   }
 
   public void testFoldBitwiseOp2() {

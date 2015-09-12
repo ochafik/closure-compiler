@@ -16,12 +16,14 @@
 
 package com.google.javascript.jscomp;
 
+import com.google.common.base.CharMatcher;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
 import com.google.debugging.sourcemap.FilePosition;
+import com.google.javascript.jscomp.CodePrinter.Builder.CodeGeneratorFactory;
+import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
-import com.google.javascript.rhino.jstype.JSTypeRegistry;
+import com.google.javascript.rhino.TypeIRegistry;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -252,6 +254,12 @@ public final class CodePrinter {
       }
       code.append(str);
       lineLength += str.length();
+      // Correct lineIndex and lineLength if there were newlines in the string.
+      int newlines = CharMatcher.is('\n').countIn(str);
+      if (newlines > 0) {
+        lineIndex += newlines;
+        lineLength = str.length() - str.lastIndexOf('\n');
+      }
     }
 
     /**
@@ -332,14 +340,12 @@ public final class CodePrinter {
 
     @Override
     void appendOp(String op, boolean binOp) {
-      if (binOp) {
-        if (getLastChar() != ' ' && op.charAt(0) != ',') {
-          append(" ");
-        }
-        append(op);
+      if (getLastChar() != ' ' && binOp && op.charAt(0) != ',') {
         append(" ");
-      } else {
-        append(op);
+      }
+      append(op);
+      if (binOp) {
+        append(" ");
       }
     }
 
@@ -450,6 +456,12 @@ public final class CodePrinter {
     void append(String str) {
       code.append(str);
       lineLength += str.length();
+      // Correct lineIndex and lineLength if there were newlines in the string.
+      int newlines = CharMatcher.is('\n').countIn(str);
+      if (newlines > 0) {
+        lineIndex += newlines;
+        lineLength = str.length() - str.lastIndexOf('\n');
+      }
     }
 
     /**
@@ -552,10 +564,20 @@ public final class CodePrinter {
   public static final class Builder {
     private final Node root;
     private CompilerOptions options = new CompilerOptions();
+    private boolean lineBreak;
+    private boolean prettyPrint;
     private boolean outputTypes = false;
     private SourceMap sourceMap = null;
     private boolean tagAsStrict;
-    private JSTypeRegistry registry;
+    private TypeIRegistry registry;
+    private CodeGeneratorFactory codeGeneratorFactory = new CodeGeneratorFactory() {
+      @Override
+      public CodeGenerator getCodeGenerator(Format outputFormat, CodeConsumer cc) {
+        return outputFormat == Format.TYPED
+            ? new TypedCodeGenerator(cc, options, registry)
+            : new CodeGenerator(cc, options);
+      }
+    };
 
     /**
      * Sets the root node from which to generate the source code.
@@ -569,15 +591,13 @@ public final class CodePrinter {
      * Sets the output options from compiler options.
      */
     public Builder setCompilerOptions(CompilerOptions options) {
-      try {
-        this.options = (CompilerOptions) options.clone();
-      } catch (CloneNotSupportedException e) {
-        throw Throwables.propagate(e);
-      }
+      this.options = options;
+      this.prettyPrint = options.prettyPrint;
+      this.lineBreak = options.lineBreak;
       return this;
     }
 
-    public Builder setTypeRegistry(JSTypeRegistry registry) {
+    public Builder setTypeRegistry(TypeIRegistry registry) {
       this.registry = registry;
       return this;
     }
@@ -587,7 +607,7 @@ public final class CodePrinter {
      * @param prettyPrint If true, pretty printing will be used.
      */
     public Builder setPrettyPrint(boolean prettyPrint) {
-      options.prettyPrint = prettyPrint;
+      this.prettyPrint = prettyPrint;
       return this;
     }
 
@@ -596,7 +616,7 @@ public final class CodePrinter {
      * @param lineBreak If true, line breaking is done automatically.
      */
     public Builder setLineBreak(boolean lineBreak) {
-      options.lineBreak = lineBreak;
+      this.lineBreak = lineBreak;
       return this;
     }
 
@@ -628,6 +648,10 @@ public final class CodePrinter {
       return this;
     }
 
+    public interface CodeGeneratorFactory {
+      CodeGenerator getCodeGenerator(Format outputFormat, CodeConsumer cc);
+    }
+
     /**
      * Generates the source code and returns it.
      */
@@ -637,36 +661,40 @@ public final class CodePrinter {
             "Cannot build without root node being specified");
       }
 
-      Format outputFormat = outputTypes
-          ? Format.TYPED
-          : options.prettyPrint
-              ? Format.PRETTY
-              : Format.COMPACT;
-
-      return toSource(root, outputFormat, options, registry,
-          sourceMap, tagAsStrict);
+      return toSource(root, Format.fromOptions(options, outputTypes, prettyPrint), options,
+          sourceMap, tagAsStrict, lineBreak, codeGeneratorFactory);
     }
   }
 
   enum Format {
     COMPACT,
     PRETTY,
-    TYPED
+    TYPED;
+
+    static Format fromOptions(CompilerOptions options, boolean outputTypes, boolean prettyPrint) {
+      if (options.getLanguageOut() == LanguageMode.ECMASCRIPT6_TYPED) {
+        return Format.PRETTY;
+      }
+      if (outputTypes) {
+        return Format.TYPED;
+      }
+      return prettyPrint ? Format.PRETTY : Format.COMPACT;
+    }
   }
 
   /**
    * Converts a tree to JS code
    */
   private static String toSource(Node root, Format outputFormat,
-      CompilerOptions options, JSTypeRegistry registry,
-      SourceMap sourceMap,  boolean tagAsStrict) {
+      CompilerOptions options, SourceMap sourceMap, boolean tagAsStrict, boolean lineBreak,
+      CodeGeneratorFactory codeGeneratorFactory) {
     Preconditions.checkState(options.sourceMapDetailLevel != null);
 
     boolean createSourceMap = (sourceMap != null);
     MappedCodePrinter mcp =
         outputFormat == Format.COMPACT
         ? new CompactCodePrinter(
-            options.lineBreak,
+            lineBreak,
             options.preferLineBreakAtEndOfFile,
             options.lineLengthThreshold,
             createSourceMap,
@@ -675,10 +703,7 @@ public final class CodePrinter {
             options.lineLengthThreshold,
             createSourceMap,
             options.sourceMapDetailLevel);
-    CodeGenerator cg =
-        outputFormat == Format.TYPED
-        ? new TypedCodeGenerator(mcp, options, registry)
-        : new CodeGenerator(mcp, options);
+    CodeGenerator cg = codeGeneratorFactory.getCodeGenerator(outputFormat, mcp);
 
     if (tagAsStrict) {
       cg.tagAsStrict();

@@ -22,13 +22,12 @@ import com.google.javascript.jscomp.ExtractPrototypeMemberDeclarations.Pattern;
  * Tests for {@link ExtractPrototypeMemberDeclarations}.
  *
  */
-public class ExtractPrototypeMemberDeclarationsTest extends CompilerTestCase {
+public final class ExtractPrototypeMemberDeclarationsTest extends CompilerTestCase {
   private static final String TMP = "JSCompiler_prototypeAlias";
   private Pattern pattern = Pattern.USE_GLOBAL_TEMP;
 
   @Override
   protected void setUp() {
-    super.enableLineNumberCheck(true);
     enableNormalize();
     pattern = Pattern.USE_GLOBAL_TEMP;
   }

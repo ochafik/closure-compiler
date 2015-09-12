@@ -30,12 +30,10 @@ import static com.google.javascript.rhino.jstype.JSTypeNative.VOID_TYPE;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.javascript.jscomp.CodingConvention.AssertionFunctionSpec;
 import com.google.javascript.jscomp.ControlFlowGraph.Branch;
-import com.google.javascript.jscomp.Scope.Var;
 import com.google.javascript.jscomp.graph.DiGraph.DiGraphEdge;
 import com.google.javascript.jscomp.type.FlowScope;
 import com.google.javascript.jscomp.type.ReverseAbstractInterpreter;
@@ -50,12 +48,13 @@ import com.google.javascript.rhino.jstype.JSTypeNative;
 import com.google.javascript.rhino.jstype.JSTypeRegistry;
 import com.google.javascript.rhino.jstype.ModificationVisitor;
 import com.google.javascript.rhino.jstype.ObjectType;
-import com.google.javascript.rhino.jstype.StaticSlot;
+import com.google.javascript.rhino.jstype.StaticTypedSlot;
 import com.google.javascript.rhino.jstype.TemplateType;
 import com.google.javascript.rhino.jstype.TemplateTypeMap;
 import com.google.javascript.rhino.jstype.TemplateTypeMapReplacer;
 import com.google.javascript.rhino.jstype.UnionType;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -81,7 +80,7 @@ class TypeInference
   private final AbstractCompiler compiler;
   private final JSTypeRegistry registry;
   private final ReverseAbstractInterpreter reverseInterpreter;
-  private final Scope syntacticScope;
+  private final TypedScope syntacticScope;
   private final FlowScope functionScope;
   private final FlowScope bottomScope;
   private final Map<String, AssertionFunctionSpec> assertionFunctionsMap;
@@ -91,7 +90,7 @@ class TypeInference
 
   TypeInference(AbstractCompiler compiler, ControlFlowGraph<Node> cfg,
                 ReverseAbstractInterpreter reverseInterpreter,
-                Scope functionScope,
+                TypedScope functionScope,
                 Map<String, AssertionFunctionSpec> assertionFunctionsMap) {
     super(cfg, new LinkedFlowScope.FlowScopeJoinOp());
     this.compiler = compiler;
@@ -107,10 +106,10 @@ class TypeInference
 
     // For each local variable declared with the VAR keyword, the entry
     // type is VOID.
-    Iterator<Var> varIt =
+    Iterator<TypedVar> varIt =
         functionScope.getDeclarativelyUnboundVarsWithoutTypes();
     while (varIt.hasNext()) {
-      Var var = varIt.next();
+      TypedVar var = varIt.next();
       if (isUnflowable(var)) {
         continue;
       }
@@ -120,13 +119,13 @@ class TypeInference
     }
 
     this.bottomScope = LinkedFlowScope.createEntryLattice(
-        Scope.createLatticeBottom(functionScope.getRootNode()));
+        TypedScope.createLatticeBottom(functionScope.getRootNode()));
   }
 
   /**
    * Infers all of a function's arguments if their types aren't declared.
    */
-  private void inferArguments(Scope functionScope) {
+  private void inferArguments(TypedScope functionScope) {
     Node functionNode = functionScope.getRootNode();
     Node astParameters = functionNode.getFirstChild().getNext();
     Node iifeArgumentNode = null;
@@ -142,7 +141,7 @@ class TypeInference
       if (parameterTypes != null) {
         Node parameterTypeNode = parameterTypes.getFirstChild();
         for (Node astParameter : astParameters.children()) {
-          Var var = functionScope.getVar(astParameter.getString());
+          TypedVar var = functionScope.getVar(astParameter.getString());
           Preconditions.checkNotNull(var);
           if (var.isTypeInferred() &&
               var.getType() == unknownType) {
@@ -208,7 +207,7 @@ class TypeInference
     BooleanOutcomePair conditionOutcomes = null;
 
     List<DiGraphEdge<Node, Branch>> branchEdges = getCfg().getOutEdges(source);
-    List<FlowScope> result = Lists.newArrayListWithCapacity(branchEdges.size());
+    List<FlowScope> result = new ArrayList<>(branchEdges.size());
     for (DiGraphEdge<Node, Branch> branchEdge : branchEdges) {
       Branch branch = branchEdge.getValue();
       FlowScope newScope = output;
@@ -529,7 +528,7 @@ class TypeInference
     switch (left.getType()) {
       case Token.NAME:
         String varName = left.getString();
-        Var var = syntacticScope.getVar(varName);
+        TypedVar var = syntacticScope.getVar(varName);
         JSType varType = var == null ? null : var.getType();
         boolean isVarDeclaration = left.hasChildren()
             && varType != null && !var.isTypeInferred();
@@ -596,9 +595,18 @@ class TypeInference
       case Token.GETPROP:
         String qualifiedName = left.getQualifiedName();
         if (qualifiedName != null) {
-          scope.inferQualifiedSlot(left, qualifiedName,
-              leftType == null ? unknownType : leftType,
-              resultType);
+          boolean declaredSlotType = false;
+          JSType rawObjType = left.getFirstChild().getJSType();
+          if (rawObjType != null) {
+            ObjectType objType = ObjectType.cast(
+                rawObjType.restrictByNotNullOrUndefined());
+            if (objType != null) {
+              String propName = left.getLastChild().getString();
+              declaredSlotType = objType.isPropertyTypeDeclared(propName);
+            }
+          }
+          JSType safeLeftType = leftType == null ? unknownType : leftType;
+          scope.inferQualifiedSlot(left, qualifiedName, safeLeftType, resultType, declaredSlotType);
         }
 
         left.setJSType(resultType);
@@ -704,7 +712,7 @@ class TypeInference
     String propName = getprop.getLastChild().getString();
     String qName = getprop.getQualifiedName();
     if (qName != null) {
-      Var var = syntacticScope.getVar(qName);
+      TypedVar var = syntacticScope.getVar(qName);
       if (var != null && !var.isTypeInferred()) {
         // Handle normal declarations that could not be addressed earlier.
         if (propName.equals("prototype") ||
@@ -730,7 +738,7 @@ class TypeInference
           getJSType(value));
       return scope;
     } else {
-      StaticSlot<JSType> var = scope.getSlot(varName);
+      StaticTypedSlot<JSType> var = scope.getSlot(varName);
       if (var != null) {
         // There are two situations where we don't want to use type information
         // from the scope, even if we have it.
@@ -756,7 +764,7 @@ class TypeInference
         // type {number}, even though it's undefined.
         boolean nonLocalInferredSlot = false;
         if (isInferred && syntacticScope.isLocal()) {
-          Var maybeOuterVar = syntacticScope.getParent().getVar(varName);
+          TypedVar maybeOuterVar = syntacticScope.getParent().getVar(varName);
           if (var == maybeOuterVar &&
               !maybeOuterVar.isMarkedAssignedExactlyOnce()) {
             nonLocalInferredSlot = true;
@@ -807,8 +815,8 @@ class TypeInference
       String memberName = NodeUtil.getObjectLitKeyName(name);
       if (memberName != null) {
         JSType rawValueType =  name.getFirstChild().getJSType();
-        JSType valueType = NodeUtil.getObjectLitKeyTypeFromValueType(
-            name, rawValueType);
+        JSType valueType =
+            TypeCheck.getObjectLitKeyTypeFromValueType(name, rawValueType);
         if (valueType == null) {
           valueType = unknownType;
         }
@@ -817,7 +825,7 @@ class TypeInference
         // Do normal flow inference if this is a direct property assignment.
         if (qObjName != null && name.isStringKey()) {
           String qKeyName = qObjName + "." + memberName;
-          Var var = syntacticScope.getVar(qKeyName);
+          TypedVar var = syntacticScope.getVar(qKeyName);
           JSType oldType = var == null ? null : var.getType();
           if (var != null && var.isTypeInferred()) {
             var.setType(oldType == null ?
@@ -826,7 +834,7 @@ class TypeInference
 
           scope.inferQualifiedSlot(name, qKeyName,
               oldType == null ? unknownType : oldType,
-              valueType);
+              valueType, false);
         }
       } else {
         n.setJSType(unknownType);
@@ -939,7 +947,7 @@ class TypeInference
     if (assertedNode == null) {
       return scope;
     }
-    JSType assertedType = assertionFunctionSpec.getAssertedType(
+    JSType assertedType = assertionFunctionSpec.getAssertedOldType(
         callNode, registry);
     String assertedNodeName = assertedNode.getQualifiedName();
 
@@ -977,7 +985,7 @@ class TypeInference
     scope = scope.createChildFlowScope();
     if (node.isGetProp()) {
       scope.inferQualifiedSlot(
-          node, node.getQualifiedName(), getJSType(node), narrowed);
+          node, node.getQualifiedName(), getJSType(node), narrowed, false);
     } else {
       redeclareSimpleVar(scope, node, narrowed);
     }
@@ -1021,18 +1029,32 @@ class TypeInference
   /**
    * When "bind" is called on a function, we infer the type of the returned
    * "bound" function by looking at the number of parameters in the call site.
+   * We also infer the "this" type of the target, if it's a function expression.
    */
   private void updateBind(Node n) {
     CodingConvention.Bind bind =
-        compiler.getCodingConvention().describeFunctionBind(n, true);
+        compiler.getCodingConvention().describeFunctionBind(n, false, true);
     if (bind == null) {
       return;
     }
 
-    FunctionType callTargetFn = getJSType(bind.target)
+    Node target = bind.target;
+    FunctionType callTargetFn = getJSType(target)
         .restrictByNotNullOrUndefined().toMaybeFunctionType();
     if (callTargetFn == null) {
       return;
+    }
+
+    if (bind.thisValue != null && target.isFunction()) {
+      JSType thisType = getJSType(bind.thisValue);
+      if (thisType.toObjectType() != null && !thisType.isUnknownType()
+          && callTargetFn.getTypeOfThis().isUnknownType()) {
+        callTargetFn = new FunctionBuilder(registry)
+            .copyFromOtherFunction(callTargetFn)
+            .withTypeOfThis(thisType.toObjectType())
+            .build();
+        target.setJSType(callTargetFn);
+      }
     }
 
     n.setJSType(
@@ -1184,23 +1206,16 @@ class TypeInference
       }
     } else if (paramType.isRecordType() && !paramType.isNominalType()) {
       // @param {{foo:T}}
-      if (!seenTypes.contains(paramType)) {
-        seenTypes.add(paramType);
+      if (seenTypes.add(paramType)) {
         ObjectType paramRecordType = paramType.toObjectType();
-        ObjectType argObjectType = argType.restrictByNotNullOrUndefined()
-            .toObjectType();
-        if (argObjectType != null
-            && !argObjectType.isUnknownType()
+        ObjectType argObjectType = argType.restrictByNotNullOrUndefined().toObjectType();
+        if (argObjectType != null && !argObjectType.isUnknownType()
             && !argObjectType.isEmptyType()) {
           Set<String> names = paramRecordType.getPropertyNames();
           for (String name : names) {
-            if (paramRecordType.hasOwnProperty(name)
-                && argObjectType.hasProperty(name)) {
-              maybeResolveTemplatedType(
-                  paramRecordType.getPropertyType(name),
-                  argObjectType.getPropertyType(name),
-                  resolvedTypes,
-                  seenTypes);
+            if (paramRecordType.hasOwnProperty(name) && argObjectType.hasProperty(name)) {
+              maybeResolveTemplatedType(paramRecordType.getPropertyType(name),
+                  argObjectType.getPropertyType(name), resolvedTypes, seenTypes);
             }
           }
         }
@@ -1301,7 +1316,7 @@ class TypeInference
    */
   private Map<String, JSType> buildTypeVariables(
       Map<TemplateType, JSType> inferredTypes) {
-    Map<String, JSType> typeVars = new HashMap<String, JSType>();
+    Map<String, JSType> typeVars = new HashMap<>();
     for (Entry<TemplateType, JSType> e : inferredTypes.entrySet()) {
       // Only add the template type that do not have a type transformation
       if (!e.getKey().isTypeTransformation()) {
@@ -1329,7 +1344,7 @@ class TypeInference
         if (ttlObj == null) {
           ttlObj = new TypeTransformation(compiler, syntacticScope);
           typeVars = buildTypeVariables(inferredTypes);
-          result = new HashMap<TemplateType, JSType>();
+          result = new HashMap<>();
         }
         // Evaluate the type transformation expression using the current
         // known types for the template type variables
@@ -1444,7 +1459,10 @@ class TypeInference
     scope = traverseChildren(n, scope);
     JSType type = getJSType(n.getFirstChild()).restrictByNotNullOrUndefined();
     TemplateTypeMap typeMap = type.getTemplateTypeMap();
-    if (typeMap.hasTemplateType(registry.getObjectElementKey())) {
+    // check the template value for IObject
+    if (typeMap.hasTemplateType(registry.getIObjectValueKey())) {
+      n.setJSType(typeMap.getConcreteTypeOfTemplateType(registry.getIObjectValueKey()));
+    } else if (typeMap.hasTemplateType(registry.getObjectElementKey())) {
       n.setJSType(typeMap.getTemplateType(registry.getObjectElementKey()));
     }
     return dereferencePointer(n.getFirstChild(), scope);
@@ -1512,7 +1530,7 @@ class TypeInference
 
     // Scopes sometimes contain inferred type info about qualified names.
     String qualifiedName = n.getQualifiedName();
-    StaticSlot<JSType> var = scope.getSlot(qualifiedName);
+    StaticTypedSlot<JSType> var = scope.getSlot(qualifiedName);
     if (var != null) {
       JSType varType = var.getType();
       if (varType != null) {
@@ -1738,7 +1756,7 @@ class TypeInference
     scope.inferSlotType(varName, varType);
   }
 
-  private boolean isUnflowable(Var v) {
+  private boolean isUnflowable(TypedVar v) {
     return v != null && v.isLocal() && v.isMarkedEscaped() &&
         // It's OK to flow a variable in the scope where it's escaped.
         v.getScope() == syntacticScope;

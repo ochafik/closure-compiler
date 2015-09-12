@@ -17,7 +17,6 @@
 package com.google.javascript.jscomp;
 
 import com.google.javascript.jscomp.ReferenceCollectingCallback.ReferenceCollection;
-import com.google.javascript.jscomp.Scope.Var;
 import com.google.javascript.rhino.JSDocInfo;
 import com.google.javascript.rhino.Node;
 
@@ -46,14 +45,14 @@ class InferConsts implements CompilerPass {
   public void process(Node externs, Node js) {
     ReferenceCollectingCallback collector = new ReferenceCollectingCallback(
         compiler, ReferenceCollectingCallback.DO_NOTHING_BEHAVIOR);
-    NodeTraversal.traverse(compiler, js, collector);
+    NodeTraversal.traverseEs6(compiler, js, collector);
 
     for (Var v : collector.getAllSymbols()) {
       considerVar(v, collector.getReferences(v));
     }
 
     Scope globalExternsScope =
-        new SyntacticScopeCreator(compiler).createScope(externs, null);
+        SyntacticScopeCreator.makeUntyped(compiler).createScope(externs, null);
     for (Var v : globalExternsScope.getAllSymbols()) {
       considerVar(v, null);
     }

@@ -20,15 +20,16 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.google.javascript.rhino.IR;
 import com.google.javascript.rhino.JSDocInfo;
+import com.google.javascript.rhino.JSDocInfoBuilder;
 import com.google.javascript.rhino.Node;
 import com.google.javascript.rhino.Token;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -72,8 +73,8 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
     protected final Node value;
 
     Export(String symbolName, Node value) {
-      this.symbolName = symbolName;
-      this.value = value;
+      this.symbolName = Preconditions.checkNotNull(symbolName);
+      this.value = Preconditions.checkNotNull(value);
     }
 
     /**
@@ -158,7 +159,7 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
      */
     private List<String> computePathPrefixes(String path) {
       List<String> pieces = Splitter.on('.').splitToList(path);
-      List<String> pathPrefixes = Lists.newArrayList();
+      List<String> pathPrefixes = new ArrayList<>();
 
       for (int i = 0; i < pieces.size(); i++) {
         pathPrefixes.add(Joiner.on(".").join(Iterables.limit(pieces, i + 1)));
@@ -219,6 +220,12 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
       return externFunction;
     }
 
+    private JSDocInfo buildEmptyJSDoc() {
+      // TODO(johnlenz): share the JSDocInfo here rather than building
+      // a new one each time.
+      return new JSDocInfoBuilder(false).build(true);
+    }
+
     /**
      * Given an object literal to export, create an object lit with all its
      * string properties. We don't care what the values of those properties
@@ -230,7 +237,7 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
 
       // This is an indirect way of telling the typed code generator
       // "print the type of this"
-      lit.setJSDocInfo(new JSDocInfo());
+      lit.setJSDocInfo(buildEmptyJSDoc());
 
       int index = 1;
       for (Node child = exportedObjectLit.getFirstChild();
@@ -322,7 +329,7 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
     public PropertyExport(String exportPath, String symbolName, Node value) {
       super(symbolName, value);
 
-      this.exportPath = exportPath;
+      this.exportPath = Preconditions.checkNotNull(exportPath);
     }
 
     @Override
@@ -356,20 +363,20 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
    * Creates an instance.
    */
   ExternExportsPass(AbstractCompiler compiler) {
-    this.exports = Lists.newArrayList();
+    this.exports = new ArrayList<>();
     this.compiler = compiler;
-    this.definitionMap = Maps.newHashMap();
+    this.definitionMap = new HashMap<>();
     this.externsRoot = IR.block();
     this.externsRoot.setIsSyntheticBlock(true);
-    this.alreadyExportedPaths = Sets.newHashSet();
-    this.mappedPaths = Maps.newHashMap();
+    this.alreadyExportedPaths = new HashSet<>();
+    this.mappedPaths = new HashMap<>();
 
     initExportMethods();
   }
 
   private void initExportMethods() {
-    exportSymbolFunctionNames = Lists.newArrayList();
-    exportPropertyFunctionNames = Lists.newArrayList();
+    exportSymbolFunctionNames = new ArrayList<>();
+    exportPropertyFunctionNames = new ArrayList<>();
 
     // From Closure:
     // goog.exportSymbol = function(publicName, symbol)
@@ -385,7 +392,7 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
 
   @Override
   public void process(Node externs, Node root) {
-    new NodeTraversal(compiler, this).traverse(root);
+    NodeTraversal.traverseEs6(compiler, root, this);
 
     // Sort by path length to ensure that the longer
     // paths (which may depend on the shorter ones)
@@ -412,7 +419,7 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
     CodePrinter.Builder builder = new CodePrinter.Builder(externsRoot)
       .setPrettyPrint(true)
       .setOutputTypes(true)
-      .setTypeRegistry(compiler.getTypeRegistry());
+      .setTypeRegistry(compiler.getTypeIRegistry());
 
     return builder.build();
   }
@@ -432,6 +439,11 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
           definitionMap.put(name, parent);
         }
 
+        JSDocInfo jsdoc = NodeUtil.getBestJSDocInfo(n);
+        if (jsdoc != null && jsdoc.isExport()) {
+          handleExportDefinition(t, n);
+        }
+
         // Only handle function calls. This avoids assignments
         // that do not export items directly.
         if (!parent.isCall()) {
@@ -439,16 +451,17 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
         }
 
         if (exportPropertyFunctionNames.contains(name)) {
-          handlePropertyExport(parent);
+          handlePropertyExportCall(parent);
         }
 
         if (exportSymbolFunctionNames.contains(name)) {
-          handleSymbolExport(parent);
+          handleSymbolExportCall(parent);
         }
+
     }
   }
 
-  private void handleSymbolExport(Node parent) {
+  private void handleSymbolExportCall(Node parent) {
     // Ensure that we only check valid calls with the 2 arguments
     // (plus the GETPROP node itself).
     if (parent.getChildCount() != 3) {
@@ -469,7 +482,7 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
     this.exports.add(new SymbolExport(nameArg.getString(), valueArg));
   }
 
-  private void handlePropertyExport(Node parent) {
+  private void handlePropertyExportCall(Node parent) {
     // Ensure that we only check valid calls with the 3 arguments
     // (plus the GETPROP node itself).
     if (parent.getChildCount() != 4) {
@@ -497,4 +510,29 @@ final class ExternExportsPass extends NodeTraversal.AbstractPostOrderCallback
                            nameArg.getString(),
                            valueArg));
   }
+
+  private void handleExportDefinition(NodeTraversal t, Node definitionNode) {
+    // For now, only handle properties defined on this inside of a constructor
+    if (!definitionNode.isGetProp()
+        || !definitionNode.getFirstChild().isThis()) {
+      // Not a property on THIS
+      return;
+    }
+
+    Node constructorNode = t.getEnclosingFunction();
+    JSDocInfo constructorJsdoc = NodeUtil.getBestJSDocInfo(constructorNode);
+    if (constructorJsdoc == null || !constructorJsdoc.isConstructor()) {
+      // Not inside a constructor
+      return;
+    }
+
+    String constructorName = NodeUtil.getFunctionName(constructorNode);
+    String propertyName = definitionNode.getLastChild().getString();
+    String prototypeName = constructorName + ".prototype";
+    Node propertyNameNode = NodeUtil.newQName(compiler, "this." + propertyName);
+
+    // Add the export to the list.
+    this.exports.add(new PropertyExport(prototypeName, propertyName, propertyNameNode));
+  }
+
 }

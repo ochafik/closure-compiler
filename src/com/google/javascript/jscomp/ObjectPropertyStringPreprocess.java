@@ -35,7 +35,7 @@ import com.google.javascript.rhino.Token;
  * @see ObjectPropertyStringPostprocess
  *
  */
-public class ObjectPropertyStringPreprocess implements CompilerPass {
+public final class ObjectPropertyStringPreprocess implements CompilerPass {
   static final String OBJECT_PROPERTY_STRING =
       "goog.testing.ObjectPropertyString";
 
@@ -68,7 +68,7 @@ public class ObjectPropertyStringPreprocess implements CompilerPass {
     addExternDeclaration(externs,
         IR.var(
             IR.name(EXTERN_OBJECT_PROPERTY_STRING)));
-    NodeTraversal.traverse(compiler, root, new Callback());
+    NodeTraversal.traverseEs6(compiler, root, new Callback());
   }
 
   private static void addExternDeclaration(Node externs, Node declarationStmt) {
@@ -85,7 +85,7 @@ public class ObjectPropertyStringPreprocess implements CompilerPass {
     public void visit(NodeTraversal t, Node n, Node parent) {
       if (n.matchesQualifiedName(OBJECT_PROPERTY_STRING)) {
         Node newName = IR.name(EXTERN_OBJECT_PROPERTY_STRING);
-        newName.copyInformationFrom(n);
+        newName.useSourceInfoIfMissingFrom(n);
         parent.replaceChild(n, newName);
         compiler.reportCodeChange();
         return;

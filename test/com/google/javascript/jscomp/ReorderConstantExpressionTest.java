@@ -20,7 +20,7 @@ package com.google.javascript.jscomp;
  * Unit test for {@link ReorderConstantExpression}
  *
  */
-public class ReorderConstantExpressionTest extends CompilerTestCase {
+public final class ReorderConstantExpressionTest extends CompilerTestCase {
 
   @Override
   protected CompilerPass getProcessor(final Compiler compiler) {
@@ -31,7 +31,6 @@ public class ReorderConstantExpressionTest extends CompilerTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    super.enableLineNumberCheck(true);
     disableTypeCheck();
   }
 

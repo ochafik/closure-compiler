@@ -16,6 +16,7 @@
 
 package com.google.javascript.jscomp.parsing;
 
+import static com.google.common.truth.Truth.assertThat;
 import static com.google.javascript.jscomp.parsing.JsDocToken.ANNOTATION;
 import static com.google.javascript.jscomp.parsing.JsDocToken.BANG;
 import static com.google.javascript.jscomp.parsing.JsDocToken.COLON;
@@ -47,7 +48,7 @@ import java.util.List;
 /**
  * Tests for {@link JsDocTokenStream}.
  */
-public class JsDocTokenStreamTest extends TestCase {
+public final class JsDocTokenStreamTest extends TestCase {
 
   public void testJsDocTokenization1() throws Exception {
     List<JsDocToken> tokens = ImmutableList.of(
@@ -77,22 +78,6 @@ public class JsDocTokenStreamTest extends TestCase {
     testJSDocTokenStream("@param {Array.<string|   null>}  ", tokens, strings);
     testJSDocTokenStream("@param {Array.<string|null>}", tokens, strings);
     testJSDocTokenStream("     @param { Array .< string |null > } ",
-        tokens, strings);
-  }
-
-  public void testJsDocTokenization3() throws Exception {
-    List<JsDocToken> tokens = ImmutableList.of(
-        ANNOTATION, LEFT_CURLY, STRING, LEFT_ANGLE, STRING, PIPE, STRING, RIGHT_ANGLE, RIGHT_CURLY);
-    List<String> strings = ImmutableList.of("param", "Array", "string", "null");
-    testJSDocTokenStream("@param {Array.<string||null>}", tokens, strings);
-    testJSDocTokenStream("@param {Array.< string || null> }", tokens, strings);
-    testJSDocTokenStream("@param {Array.<string || null >  } ",
-        tokens, strings);
-    testJSDocTokenStream("@param {Array .<string   ||null>}", tokens, strings);
-    testJSDocTokenStream("@param {Array.< string||null>}", tokens, strings);
-    testJSDocTokenStream("@param {  Array.<string||null>}", tokens, strings);
-    testJSDocTokenStream(" @param   {Array.<string||null>}", tokens, strings);
-    testJSDocTokenStream("@param   {   Array.<string|| null> }",
         tokens, strings);
   }
 
@@ -293,12 +278,12 @@ public class JsDocTokenStreamTest extends TestCase {
 
       // token equality
       if (token != readToken) {
-        assertEquals(token, readToken);
+        assertThat(readToken).isEqualTo(token);
       }
 
       // string equality
       if (token == ANNOTATION || token == STRING) {
-        assertEquals(strings.get(stringsIndex++), stream.getString());
+        assertThat(stream.getString()).isEqualTo(strings.get(stringsIndex++));
       }
     }
   }

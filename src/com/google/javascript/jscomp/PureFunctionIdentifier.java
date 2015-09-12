@@ -20,13 +20,10 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
+import com.google.common.collect.ImmutableList;
 import com.google.common.io.Files;
 import com.google.javascript.jscomp.DefinitionsRemover.Definition;
 import com.google.javascript.jscomp.NodeTraversal.ScopedCallback;
-import com.google.javascript.jscomp.Scope.Var;
 import com.google.javascript.jscomp.graph.DiGraph;
 import com.google.javascript.jscomp.graph.FixedPointGraphTraversal;
 import com.google.javascript.jscomp.graph.FixedPointGraphTraversal.EdgeCallback;
@@ -43,6 +40,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -94,8 +92,8 @@ class PureFunctionIdentifier implements CompilerPass {
                                 DefinitionProvider definitionProvider) {
     this.compiler = compiler;
     this.definitionProvider = definitionProvider;
-    this.functionSideEffectMap = Maps.newHashMap();
-    this.allFunctionCalls = Lists.newArrayList();
+    this.functionSideEffectMap = new HashMap<>();
+    this.allFunctionCalls = new ArrayList<>();
     this.externs = null;
     this.root = null;
   }
@@ -112,8 +110,8 @@ class PureFunctionIdentifier implements CompilerPass {
     externs = externsAst;
     root = srcAst;
 
-    NodeTraversal.traverse(compiler, externs, new FunctionAnalyzer(true));
-    NodeTraversal.traverse(compiler, root, new FunctionAnalyzer(false));
+    NodeTraversal.traverseEs6(compiler, externs, new FunctionAnalyzer(true));
+    NodeTraversal.traverseEs6(compiler, root, new FunctionAnalyzer(false));
 
     propagateSideEffects();
 
@@ -154,7 +152,7 @@ class PureFunctionIdentifier implements CompilerPass {
       Node function = entry.getKey();
       FunctionInformation functionInfo = entry.getValue();
 
-      Set<String> depFunctionNames = Sets.newHashSet();
+      Set<String> depFunctionNames = new HashSet<>();
       for (Node callSite : functionInfo.getCallsInFunctionBody()) {
         Collection<Definition> defs =
             getCallableDefinitions(definitionProvider,
@@ -171,9 +169,8 @@ class PureFunctionIdentifier implements CompilerPass {
         }
       }
 
-      sb.append(functionNames.getFunctionName(function) + " " +
-                functionInfo.toString() +
-                " Calls: " + depFunctionNames + "\n");
+      sb.append(functionNames.getFunctionName(function) + " " + functionInfo + " Calls: "
+          + depFunctionNames + "\n");
     }
 
     return sb.toString();
@@ -193,7 +190,7 @@ class PureFunctionIdentifier implements CompilerPass {
   private static Collection<Definition> getCallableDefinitions(
       DefinitionProvider definitionProvider, Node name) {
     if (name.isGetProp() || name.isName()) {
-      List<Definition> result = Lists.newArrayList();
+      List<Definition> result = new ArrayList<>();
 
       Collection<Definition> decls =
           definitionProvider.getDefinitionsReferencedAt(name);
@@ -239,7 +236,7 @@ class PureFunctionIdentifier implements CompilerPass {
       // getCallableDefinitions() will only be called on the first
       // child of a call and thus the function expression
       // definition will never be an extern.
-      return Lists.newArrayList(
+      return ImmutableList.of(
           (Definition)
               new DefinitionsRemover.FunctionExpressionDefinition(name, false));
     } else {
@@ -447,8 +444,7 @@ class PureFunctionIdentifier implements CompilerPass {
               // Variable definition are not side effects.
               // Just check that the name appears in the context of a
               // variable declaration.
-              Preconditions.checkArgument(
-                  NodeUtil.isVarDeclaration(node));
+              Preconditions.checkArgument(NodeUtil.isVarDeclaration(node));
               Node value = node.getFirstChild();
               // Assignment to local, if the value isn't a safe local value,
               // new object creation or literal or known primitive result
@@ -484,14 +480,22 @@ class PureFunctionIdentifier implements CompilerPass {
 
     @Override
     public void exitScope(NodeTraversal t) {
-      if (t.inGlobalScope()) {
+      if (!(t.getScope().isFunctionBlockScope()
+          || t.getScope().isFunctionScope())) {
+        return;
+      }
+
+      Node function = NodeUtil.getEnclosingFunction(t.getScopeRoot());
+      if (function == null) {
         return;
       }
 
       // Handle deferred local variable modifications:
       //
-      FunctionInformation sideEffectInfo =
-        functionSideEffectMap.get(t.getScopeRoot());
+      FunctionInformation sideEffectInfo = functionSideEffectMap.get(function);
+      if (sideEffectInfo == null) {
+        return;
+      }
       if (sideEffectInfo.mutatesGlobalState()){
         sideEffectInfo.resetLocalVars();
         return;
@@ -528,10 +532,22 @@ class PureFunctionIdentifier implements CompilerPass {
         }
       }
 
-      sideEffectInfo.taintedLocals = Collections.emptySet();
-      sideEffectInfo.blacklisted = Collections.emptySet();
+      if (t.getScopeRoot().isFunction()) {
+        sideEffectInfo.resetLocalVars();
+      }
     }
 
+    private boolean varDeclaredInDifferentFunction(Var v, Scope scope) {
+      if (v == null) {
+        return true;
+      } else if (v.scope != scope) {
+        Node declarationRoot = NodeUtil.getEnclosingFunction(v.scope.rootNode);
+        Node scopeRoot = NodeUtil.getEnclosingFunction(scope.rootNode);
+        return declarationRoot != scopeRoot;
+      } else {
+        return false;
+      }
+    }
 
     /**
      * Record information about the side effects caused by an
@@ -548,7 +564,7 @@ class PureFunctionIdentifier implements CompilerPass {
         Scope scope, Node op, Node lhs, Node rhs) {
       if (lhs.isName()) {
         Var var = scope.getVar(lhs.getString());
-        if (var == null || var.scope != scope) {
+        if (varDeclaredInDifferentFunction(var, scope)) {
           sideEffectInfo.setTaintsGlobalState();
         } else {
           // Assignment to local, if the value isn't a safe local value,
@@ -575,7 +591,7 @@ class PureFunctionIdentifier implements CompilerPass {
           if (objectNode.isName()) {
             var = scope.getVar(objectNode.getString());
           }
-          if (var == null || var.scope != scope) {
+          if (varDeclaredInDifferentFunction(var, scope)) {
             sideEffectInfo.setTaintsUnknown();
           } else {
             // Maybe a local object modification.  We won't know for sure until
@@ -692,7 +708,7 @@ class PureFunctionIdentifier implements CompilerPass {
     private boolean isLocalValueType(JSType jstype) {
       Preconditions.checkNotNull(jstype);
       JSType subtype =  jstype.getGreatestSubtype(
-          compiler.getTypeRegistry().getNativeType(JSTypeNative.OBJECT_TYPE));
+          (JSType) compiler.getTypeIRegistry().getNativeType(JSTypeNative.OBJECT_TYPE));
       // If the type includes anything related to a object type, don't assume
       // anything about the locality of the value.
       return subtype.isNoType();
@@ -928,10 +944,6 @@ class PureFunctionIdentifier implements CompilerPass {
       return getMask(TAINTS_THIS_MASK);
     }
 
-    private boolean taintsArguments() {
-      return getMask(TAINTS_ARGUMENTS_MASK);
-    }
-
     private boolean taintsUnknown() {
       return getMask(TAINTS_UNKNOWN_MASK);
     }
@@ -1108,7 +1120,7 @@ class PureFunctionIdentifier implements CompilerPass {
     private void checkInvariant() {
       boolean invariant = mayBePure() || mayHaveSideEffects();
       if (!invariant) {
-        throw new IllegalStateException("Invariant failed.  " + toString());
+        throw new IllegalStateException("Invariant failed.  " + this);
       }
     }
 
@@ -1134,7 +1146,7 @@ class PureFunctionIdentifier implements CompilerPass {
 
     @Override
     public String toString() {
-      List<String> status = Lists.newArrayList();
+      List<String> status = new ArrayList<>();
       if (extern()) {
         status.add("extern");
       }
@@ -1159,7 +1171,7 @@ class PureFunctionIdentifier implements CompilerPass {
         status.add("complex");
       }
 
-      return "Side effects: " + status.toString();
+      return "Side effects: " + status;
     }
   }
 

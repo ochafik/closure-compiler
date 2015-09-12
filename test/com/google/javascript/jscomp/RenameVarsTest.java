@@ -26,11 +26,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
-
 /**
  * Tests for {@link RenameVars}.
  */
-public class RenameVarsTest extends CompilerTestCase {
+public final class RenameVarsTest extends CompilerTestCase {
   private static final String DEFAULT_PREFIX = "";
   private String prefix = DEFAULT_PREFIX;
 
@@ -119,9 +118,11 @@ public class RenameVarsTest extends CompilerTestCase {
   }
 
   public void testRenameRedeclaredGlobals() {
-    test("function f1(v1, v2) {f1()};" +
-         "/** @suppress {duplicate} */" +
-         "function f1(v3, v4) {f1()};",
+    test(
+        LINE_JOINER.join(
+            "function f1(v1, v2) {f1()};",
+         "/** @suppress {duplicate} */",
+         "function f1(v3, v4) {f1()};"),
          "function a(b, c) {a()};" +
          "function a(b, c) {a()};");
 
@@ -218,6 +219,17 @@ public class RenameVarsTest extends CompilerTestCase {
          "}");
   }
 
+  public void testBleedingFunctionInBlocks() {
+    test(LINE_JOINER.join(
+            "if (true) {",
+            "   var x = function a(x) {return x;}",
+            "}"),
+        LINE_JOINER.join(
+            "if (true) {",
+            "   var c = function b(a) {return a;}",
+            "}"));
+  }
+
   public void testRenameWithExterns1() {
     String externs = "var foo;";
     test(externs, "var bar; foo(bar);", "var a; foo(a);", null, null);
@@ -272,9 +284,9 @@ public class RenameVarsTest extends CompilerTestCase {
 
   public void testNamingBasedOnOrderOfOccurrence() {
     test("var q,p,m,n,l,k; " +
-             "(function (r) {}); try { } catch(s) {}; var t = q + q;",
+             "try { } catch(r) {try {} catch(s) {}}; var t = q + q;",
          "var a,b,c,d,e,f; " +
-             "(function(g) {}); try { } catch(h) {}; var i = a + a;"
+             "try { } catch(g) {try {} catch(h) {}}; var i = a + a;"
          );
     test("(function(A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z," +
          "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,$){});" +
@@ -282,6 +294,42 @@ public class RenameVarsTest extends CompilerTestCase {
          "(function(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z," +
          "A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,$){});" +
          "var aa,ba,ca,da,ea,fa,ga,ha,ia,ja,ka,la;function ma(){};");
+  }
+
+  public void testTryCatchLifeTime () {
+    test("var q,p,m,n,l,k; " +
+        "(function (r) {}); try { } catch(s) {}; var t = q + q;",
+    "var a,c,d,e,f,g; " +
+        "(function(b) {}); try { } catch(b) {}; var h = a + a;"
+    );
+
+    test("try {try {} catch(p) {}} catch(s) {};",
+         "try {try {} catch(a) {}} catch(a) {};"
+    );
+
+    test(
+        LINE_JOINER.join(
+            "try {",
+            "  try { ",
+            "  } catch(p) {",
+            "    try { ",
+            "    } catch(r) {}",
+            "  }",
+            "} catch(s) {",
+            "  try { ",
+            "  } catch(q) {}",
+            "};"),
+        LINE_JOINER.join(
+            "try {",
+            "  try { ",
+            "  } catch(a) {",
+            "    try { ",
+            "    } catch(b) {}",
+            "  }",
+            "} catch(a) {",
+            "  try { ",
+            "  } catch(b) {}",
+            "};"));
   }
 
   public void testStableRenameSimple() {
@@ -482,8 +530,8 @@ public class RenameVarsTest extends CompilerTestCase {
   }
 
   public void testPrevUsedMapWithDuplicates() {
-    previouslyUsedMap = makeVariableMap("Foo", "z", "Bar", "z");
     try {
+      makeVariableMap("Foo", "z", "Bar", "z");
       testSame("");
       fail();
     } catch (java.lang.IllegalArgumentException expected) {
@@ -569,14 +617,14 @@ public class RenameVarsTest extends CompilerTestCase {
   private void testRenameMapUsingOldMap(String input, String expected,
                                         VariableMap expectedMap) {
     previouslyUsedMap = renameVars.getVariableMap();
-    testRenameMap("", input, expected,  expectedMap);
+    testRenameMap("", input, expected, expectedMap);
   }
 
   private void testRenameMapUsingOldMap(String externs, String input,
                                         String expected,
                                         VariableMap expectedMap) {
     previouslyUsedMap = renameVars.getVariableMap();
-    testRenameMap(externs, input, expected,  expectedMap);
+    testRenameMap(externs, input, expected, expectedMap);
   }
 
   private void testRenameMap(String input, String expected,

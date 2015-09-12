@@ -40,11 +40,9 @@
 package com.google.javascript.rhino;
 
 import com.google.javascript.rhino.jstype.JSType;
-import com.google.javascript.rhino.jstype.JSTypeRegistry;
-import com.google.javascript.rhino.jstype.StaticScope;
+import com.google.javascript.rhino.jstype.StaticTypedScope;
 
 import java.io.Serializable;
-
 
 /**
  * Represents a type expression as a miniature Rhino AST, so that the
@@ -64,10 +62,6 @@ public final class JSTypeExpression implements Serializable {
   public JSTypeExpression(Node root, String sourceName) {
     this.root = root;
     this.sourceName = sourceName;
-  }
-
-  public Node getRootNode() {
-    return root;
   }
 
   /**
@@ -100,10 +94,14 @@ public final class JSTypeExpression implements Serializable {
   /**
    * Evaluates the type expression into a {@code JSType} object.
    */
-  public JSType evaluate(StaticScope<JSType> scope, JSTypeRegistry registry) {
-    JSType type = registry.createFromTypeNodes(root, sourceName, scope);
+  public JSType evaluate(StaticTypedScope<JSType> scope, TypeIRegistry registry) {
+    JSType type = (JSType) registry.createTypeFromCommentNode(root, sourceName, scope);
     root.setJSType(type);
     return type;
+  }
+
+  public TypeI evaluateInEmptyScope(TypeIRegistry registry) {
+    return evaluate(null, registry);
   }
 
   @Override
@@ -123,5 +121,14 @@ public final class JSTypeExpression implements Serializable {
    */
   public Node getRoot() {
     return root;
+  }
+
+  @Override
+  public String toString() {
+    return "type: " + root.toString();
+  }
+
+  public JSTypeExpression clone() {
+    return new JSTypeExpression(root.cloneTree(), sourceName);
   }
 }
