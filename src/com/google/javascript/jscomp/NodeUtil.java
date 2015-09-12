@@ -31,6 +31,7 @@ import com.google.javascript.rhino.StaticSourceFile;
 import com.google.javascript.rhino.Token;
 import com.google.javascript.rhino.TokenStream;
 import com.google.javascript.rhino.TokenUtil;
+import com.google.javascript.rhino.jstype.JSType;
 import com.google.javascript.rhino.jstype.TernaryValue;
 
 import java.util.Collection;
@@ -51,8 +52,6 @@ import javax.annotation.Nullable;
  */
 public final class NodeUtil {
   static final long MAX_POSITIVE_INTEGER_NUMBER = 1L << 53;
-
-  static final String JSC_PROPERTY_NAME_FN = "JSCompiler_renameProperty";
 
   static final char LARGEST_BASIC_LATIN = 0x7f;
 

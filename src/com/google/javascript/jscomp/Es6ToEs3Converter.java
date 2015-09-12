@@ -46,10 +46,6 @@ import java.util.Set;
 public final class Es6ToEs3Converter implements NodeTraversal.Callback, HotSwapCompilerPass {
   private final AbstractCompiler compiler;
 
-  static final DiagnosticType CANNOT_CONVERT = DiagnosticType.error(
-      "JSC_CANNOT_CONVERT",
-      "This code cannot be converted from ES6. {0}");
-
   // TODO(tbreisacher): Remove this once we have implemented transpilation for all the features
   // we intend to support.
   static final DiagnosticType CANNOT_CONVERT_YET = DiagnosticType.error(
@@ -89,6 +85,7 @@ public final class Es6ToEs3Converter implements NodeTraversal.Callback, HotSwapC
   // These functions are defined in js/es6_runtime.js
   static final String INHERITS = "$jscomp.inherits";
   static final String MAKE_ITER = "$jscomp.makeIterator";
+  static final String CALL_SUPER_GETTER = "$jscomp.callSuperGetter";
 
   public Es6ToEs3Converter(AbstractCompiler compiler) {
     this.compiler = compiler;
