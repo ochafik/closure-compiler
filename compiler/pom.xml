@@ -38,7 +38,6 @@
   <inceptionYear>2009</inceptionYear>
 
   <properties>
-    <!-- -Dprotoc.executable=/usr/local/Cellar/protobuf/2.6.1/bin/protoc -->
     <protoc.executable>protoc</protoc.executable>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.build.outputEncoding>UTF-8</project.build.outputEncoding>
@@ -79,7 +78,7 @@
     <dependency>
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
-      <version>2.6.1</version>
+      <version>2.5.0</version>
     </dependency>
 
     <dependency>
