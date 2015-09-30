@@ -87,8 +87,18 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
   }
 
   public void testUnaffectedCalls() {
-    testSame("var x = super()");
-    testSame("var x = super.bar()");
-    testSame("class X extends Y { static foo() { super.bar() } }");
+    testSame(LINE_JOINER.join(
+        "foo.bar;",
+        "foo.bar();",
+        "this.bar;",
+        "this.bar();",
+        "super();",
+        "super.bar();"));
+    testSame(LINE_JOINER.join(
+        "class X extends Y {",
+        "  static foo() {",
+        "    return super.bar",
+        "  }",
+        "}"));
   }
 }
