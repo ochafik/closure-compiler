@@ -15,6 +15,7 @@
  */
 package com.google.javascript.jscomp;
 
+import com.google.common.collect.ImmutableList;
 import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 
 /**
@@ -23,6 +24,10 @@ import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
  * @author ochafik@google.com (Olivier Chafik)
  */
 public final class DartSuperAccessorsPassTest extends CompilerTestCase {
+
+  /** Signature of the member functions / accessors we'll wrap expressions into. */
+  private static final ImmutableList<String> MEMBER_SIGNATURES =
+      ImmutableList.of("method()", "get prop()", "set prop(v)", "constructor()");
 
   @Override
   public void setUp() {
@@ -63,42 +68,71 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
     return 1;
   }
 
+  /**
+   * Wraps a body (statements) in a member function / accessor with the provided signature.
+   * (can be static or not).
+   */
+  private String wrap(String memberSignature, String body) {
+    return LINE_JOINER.join(
+        "class X extends Y {",
+        "  " + memberSignature + " {",
+        "    " + body,
+        "  }",
+        "}");
+  }
+
   public void testSuperGet() {
-    test("var x = super['prop']",
-        "var x = $jscomp.superGet(this, 'prop')");
-    test("var x = super.prop",
-        "var x = $jscomp.superGet(this, JSCompiler_renameProperty('prop'))");
+    for (String sig : MEMBER_SIGNATURES) {
+      test(wrap(sig, "return super['prop']"),
+          wrap(sig, "return $jscomp.superGet(this, 'prop')"));
+      test(wrap(sig, "return super.prop"),
+          wrap(sig, "return $jscomp.superGet(this, JSCompiler_renameProperty('prop'))"));
+    }
   }
 
   public void testSuperSet() {
-    test("super['prop'] = x",
-        "$jscomp.superSet(this, 'prop', x)");
-    test("super.prop = x",
-        "$jscomp.superSet(this, JSCompiler_renameProperty('prop'), x)");
+    for (String sig : MEMBER_SIGNATURES) {
+      test(wrap(sig, "super['prop'] = x"),
+          wrap(sig, "$jscomp.superSet(this, 'prop', x)"));
+      test(wrap(sig, "super.prop = x"),
+          wrap(sig, "$jscomp.superSet(this, JSCompiler_renameProperty('prop'), x)"));
+    }
   }
   
   public void testSuperSetRecursion() {
-    test("super['x'] = super['y']",
-        "$jscomp.superSet(this, 'x', $jscomp.superGet(this, 'y'))");
-    test("super['x'] = super['y'] = 10",
-        "$jscomp.superSet(this, 'x', $jscomp.superSet(this, 'y', 10))");
-    test("super['x'] = 1 + super['y']",
-        "$jscomp.superSet(this, 'x', 1 + $jscomp.superGet(this, 'y'))");
+    for (String sig : MEMBER_SIGNATURES) {
+      test(wrap(sig, "super['x'] = super['y']"),
+          wrap(sig, "$jscomp.superSet(this, 'x', $jscomp.superGet(this, 'y'))"));
+      test(wrap(sig, "super['x'] = super['y'] = 10"),
+          wrap(sig, "$jscomp.superSet(this, 'x', $jscomp.superSet(this, 'y', 10))"));
+      test(wrap(sig, "super['x'] = 1 + super['y']"),
+          wrap(sig, "$jscomp.superSet(this, 'x', 1 + $jscomp.superGet(this, 'y'))"));
+    }
   }
 
-  public void testUnaffectedCalls() {
-    testSame(LINE_JOINER.join(
+  public void testExpressionsWithoutSuperAccessors() {
+    String body = LINE_JOINER.join(
         "foo.bar;",
         "foo.bar();",
         "this.bar;",
         "this.bar();",
         "super();",
-        "super.bar();"));
-    testSame(LINE_JOINER.join(
-        "class X extends Y {",
-        "  static foo() {",
-        "    return super.bar",
-        "  }",
-        "}"));
+        "super.bar();");
+
+    for (String sig : MEMBER_SIGNATURES) {
+      testSame(wrap(sig, body));
+    }
+  }
+
+  public void testSuperAccessorsOutsideInstanceMembers() {
+    String body = LINE_JOINER.join(
+        "super.x;",
+        "super.x = y;");
+
+    testSame(body);
+
+    for (String sig : MEMBER_SIGNATURES) {
+      testSame(wrap("static " + sig, body));
+    }
   }
 }

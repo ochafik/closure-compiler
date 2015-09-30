@@ -954,6 +954,11 @@ public abstract class AbstractCommandLineRunner<A extends Compiler,
     compiler = createCompiler();
     B options = createOptions();
 
+    if (options.dartPass) {
+      options.setAmbiguateProperties(false);
+      options.setDisambiguateProperties(false);
+    }
+
     List<SourceFile> externs = createExterns(options);
 
     List<JSModule> modules = null;

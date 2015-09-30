@@ -36,7 +36,8 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
     this.compiler = compiler;
     CompilerOptions options = compiler.getOptions();
     // We currently rely on JSCompiler_renameProperty, which is not type-aware.
-    // We would need support for something like goog.reflect.object (using parent class type).
+    // We would need something like goog.reflect.object (with the super class type),
+    // but right now this would yield much larger code.
     Preconditions.checkState(!options.ambiguateProperties && !options.disambiguateProperties,
         "Dart super accessors pass is not compatible with property (de)ambiguation yet");
   }
@@ -50,32 +51,43 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
       visitSuperSet(n);
       return false;
     }
+
     return true;
+  }
+
+  private boolean isCalled(Node n) {
+    Node parent = n.getParent();
+    if (parent.isCall()) {
+      return n == parent.getFirstChild();
+    }
+    return false;
   }
 
   @Override
   public void visit(NodeTraversal t, Node n, Node parent) {}
 
-  private static boolean isSuperGet(Node n) {
+  private boolean isSuperGet(Node n) {
     return (n.isGetProp() || n.isGetElem())
-        && !n.getParent().isCall()
+        && !isCalled(n)
         && n.getFirstChild().isSuper()
-        && !isEnclosedByStaticMember(n);
+        && isInsideInstanceMember(n);
   }
 
-  private static boolean isSuperSet(Node n) {
+  private boolean isSuperSet(Node n) {
     // TODO(ochafik): Handle Token.ASSIGN_ADD (super.x += 1).
     return n.isAssign() && isSuperGet(n.getFirstChild());
   }
 
   /**
-   * Returns true if this node is or is enclosed by a static member definition (static method,
+   * Returns true if this node is or is enclosed by an instance member definition (non-static method,
    * getter or setter).
    */
-  private static boolean isEnclosedByStaticMember(Node n) {
+  private static boolean isInsideInstanceMember(Node n) {
     while (n != null) {
-      if (n.isMemberFunctionDef() && n.isStaticMember()) {
-        return true;
+      if (n.isMemberFunctionDef()
+          || n.isGetterDef()
+          || n.isSetterDef()) {
+        return !n.isStaticMember();
       }
       if (n.isClass()) {
         // Stop at the first enclosing class.
@@ -87,8 +99,6 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
   }
 
   private void visitSuperGet(Node superGet) {
-    Preconditions.checkArgument(isSuperGet(superGet));
-
     Node name = superGet.getLastChild().cloneTree();
     Node callSuperGet = IR.call(
         NodeUtil.newQName(compiler, CALL_SUPER_GET),
@@ -103,11 +113,10 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
   }
 
   private void visitSuperSet(Node superSet) {
-    Preconditions.checkArgument(isSuperSet(superSet));
-    
-    // Recurse on the assignment right-hand-side.
+    // First, recurse on the assignment's right-hand-side.
     NodeTraversal.traverse(compiler, superSet.getLastChild(), this);
     Node rhs = superSet.getLastChild();
+
     Node superGet = superSet.getFirstChild();
 
     Node name = superGet.getLastChild().cloneTree();
