@@ -62,9 +62,11 @@ $jscomp.superGet = function(target, propertyName) {
  * Sets a property on a target instance using its super setter if is defined
  * on any ancestor, or setting it as a simple property on the target otherwise.
  *
+ * @template T
  * @param {!Object} target
  * @param {!string} propertyName
- * @param {*} value
+ * @param {T} value
+ * @return {T}
  */
 $jscomp.superSet = function(target, propertyName, value) {
   var desc = $jscomp.getSuperPropertyDescriptor_(target, propertyName);
@@ -75,4 +77,5 @@ $jscomp.superSet = function(target, propertyName, value) {
     desc.setter.call(target, value);
   }
   target[propertyName] = value;
+  return value;
 };

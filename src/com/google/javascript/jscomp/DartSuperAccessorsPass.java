@@ -27,7 +27,8 @@ import com.google.javascript.rhino.Node;
  */
 public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
     HotSwapCompilerPass {
-  static final String CALL_SUPER_GETTER = "$jscomp.callSuperGetter";
+  static final String CALL_SUPER_GET = "$jscomp.superGet";
+  static final String CALL_SUPER_SET = "$jscomp.superSet";
 
   private final AbstractCompiler compiler;
 
@@ -44,7 +45,9 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
   public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
     if (isSuperGet(n)) {
       visitSuperGet(n);
-      // Don't visit the super we've just removed.
+      return false;
+    } else if (isSuperSet(n)) {
+      visitSuperSet(n);
       return false;
     }
     return true;
@@ -58,6 +61,11 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
         && !n.getParent().isCall()
         && n.getFirstChild().isSuper()
         && !isEnclosedByStaticMember(n);
+  }
+
+  private static boolean isSuperSet(Node n) {
+    // TODO(ochafik): Handle Token.ASSIGN_ADD (super.x += 1).
+    return n.isAssign() && isSuperGet(n.getFirstChild());
   }
 
   /**
@@ -78,16 +86,39 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
     return false;
   }
 
-  private void visitSuperGet(Node n) {
-    Preconditions.checkArgument(isSuperGet(n));
+  private void visitSuperGet(Node superGet) {
+    Preconditions.checkArgument(isSuperGet(superGet));
 
-    Node name = n.getLastChild().cloneTree();
-    Node callSuperGetter = IR.call(
-        NodeUtil.newQName(compiler, CALL_SUPER_GETTER),
+    Node name = superGet.getLastChild().cloneTree();
+    Node callSuperGet = IR.call(
+        NodeUtil.newQName(compiler, CALL_SUPER_GET),
         IR.thisNode(),
-        n.isGetProp() ? renameProperty(name) : name).srcrefTree(n);
+        superGet.isGetProp() ? renameProperty(name) : name);
+    callSuperGet.srcrefTree(superGet);
 
-    n.getParent().replaceChild(n, callSuperGetter);
+    superGet.getParent().replaceChild(superGet, callSuperGet);
+
+    compiler.needsEs6DartRuntime = true;
+    compiler.reportCodeChange();
+  }
+
+  private void visitSuperSet(Node superSet) {
+    Preconditions.checkArgument(isSuperSet(superSet));
+    
+    // Recurse on the assignment right-hand-side.
+    NodeTraversal.traverse(compiler, superSet.getLastChild(), this);
+    Node rhs = superSet.getLastChild();
+    Node superGet = superSet.getFirstChild();
+
+    Node name = superGet.getLastChild().cloneTree();
+    Node callSuperSet = IR.call(
+        NodeUtil.newQName(compiler, CALL_SUPER_SET),
+        IR.thisNode(),
+        superGet.isGetProp() ? renameProperty(name) : name,
+        rhs.cloneTree().srcrefTree(rhs));
+    callSuperSet.srcrefTree(superSet);
+
+    superSet.getParent().replaceChild(superSet, callSuperSet);
 
     compiler.needsEs6DartRuntime = true;
     compiler.reportCodeChange();

@@ -15,10 +15,6 @@
  */
 package com.google.javascript.jscomp;
 
-import static com.google.javascript.jscomp.Es6ToEs3Converter.CANNOT_CONVERT;
-import static com.google.javascript.jscomp.Es6ToEs3Converter.CANNOT_CONVERT_YET;
-import static com.google.javascript.jscomp.Es6ToEs3Converter.CONFLICTING_GETTER_SETTER_TYPE;
-
 import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 
 /**
@@ -69,7 +65,7 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
 
   public void testSuperGet() {
     test("var x = super['prop']",
-        "var x = $jscomp.callSuperGetter(this, 'prop')");
+        "var x = $jscomp.superGet(this, 'prop')");
     test("var x = super.prop",
         "var x = $jscomp.superGet(this, JSCompiler_renameProperty('prop'))");
   }
@@ -80,25 +76,19 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
     test("super.prop = x",
         "$jscomp.superSet(this, JSCompiler_renameProperty('prop'), x)");
   }
-    // test("class D {} class C extends D { f() { var i = super.c; i = super.foo.bar(); } }",
-    //     LINE_JOINER.join(
-    //         "/** @constructor @struct */",
-    //         "var D = function() {};",
-    //         "/** @constructor @struct @extends {D} */",
-    //         "var C = function(var_args) { D.apply(this, arguments); };",
-    //         "$jscomp.inherits(C, D);",
-    //         "C.prototype.f = function() {",
-    //         "  var i = $jscomp.callSuperGetter(this, JSCompiler_renameProperty('c'));",
-    //         "  i = $jscomp.callSuperGetter(this, JSCompiler_renameProperty('foo')).bar();",
-    //         "};"));
-    // test("class D {} class C extends D { f() { var i = super['s']; } }",
-    //     LINE_JOINER.join(
-    //         "/** @constructor @struct */",
-    //         "var D = function() {};",
-    //         "/** @constructor @struct @extends {D} */",
-    //         "var C = function(var_args) { D.apply(this, arguments); };",
-    //         "$jscomp.inherits(C, D);",
-    //         "C.prototype.f = function() {",
-    //         "  var i = $jscomp.callSuperGetter(this, 's');",
-    //         "};"));
+  
+  public void testSuperSetRecursion() {
+    test("super['x'] = super['y']",
+        "$jscomp.superSet(this, 'x', $jscomp.superGet(this, 'y'))");
+    test("super['x'] = super['y'] = 10",
+        "$jscomp.superSet(this, 'x', $jscomp.superSet(this, 'y', 10))");
+    test("super['x'] = 1 + super['y']",
+        "$jscomp.superSet(this, 'x', 1 + $jscomp.superGet(this, 'y'))");
+  }
+
+  public void testUnaffectedCalls() {
+    testSame("var x = super()");
+    testSame("var x = super.bar()");
+    testSame("class X extends Y { static foo() { super.bar() } }");
+  }
 }

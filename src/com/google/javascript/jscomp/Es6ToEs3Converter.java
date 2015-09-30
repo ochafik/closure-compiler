@@ -45,7 +45,7 @@ import java.util.Set;
  */
 public final class Es6ToEs3Converter implements NodeTraversal.Callback, HotSwapCompilerPass {
   private final AbstractCompiler compiler;
- 
+
   static final DiagnosticType CANNOT_CONVERT = DiagnosticType.error(
       "JSC_CANNOT_CONVERT",
       "This code cannot be converted from ES6. {0}");
