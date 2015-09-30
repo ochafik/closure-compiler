@@ -22,11 +22,12 @@ import com.google.javascript.rhino.Node;
 /**
  * Converts {@code super} getter and setter calls in order to support the output
  * of the Dart Dev Compiler. This has to run before the {@link Es6ConvertSuper} pass.
+ *
+ * @author ochafik@google.com (Olivier Chafik)
  */
 public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
     HotSwapCompilerPass {
   static final String CALL_SUPER_GETTER = "$jscomp.callSuperGetter";
-  static final String JSC_PROPERTY_NAME_FN = "JSCompiler_renameProperty";
 
   private final AbstractCompiler compiler;
 
@@ -99,7 +100,7 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
    */
   private static Node renameProperty(Node propertyName) {
     Preconditions.checkArgument(propertyName.isString());
-    Node call = IR.call(IR.name(JSC_PROPERTY_NAME_FN), propertyName).srcrefTree(propertyName);
+    Node call = IR.call(IR.name(NodeUtil.JSC_PROPERTY_NAME_FN), propertyName).srcrefTree(propertyName);
     call.putBooleanProp(Node.FREE_CALL, true);
     return call;
   }

@@ -53,6 +53,8 @@ import javax.annotation.Nullable;
 public final class NodeUtil {
   static final long MAX_POSITIVE_INTEGER_NUMBER = 1L << 53;
 
+  static final String JSC_PROPERTY_NAME_FN = "JSCompiler_renameProperty";
+
   static final char LARGEST_BASIC_LATIN = 0x7f;
 
   /** the set of builtin constructors that don't have side effects. */

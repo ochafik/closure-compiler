@@ -39,6 +39,8 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
     CompilerOptions options = super.getOptions();
     options.setLanguageOut(LanguageMode.ECMASCRIPT5);
     options.setDartPass(true);
+    options.setAmbiguateProperties(false);
+    options.setDisambiguateProperties(false);
     return options;
   }
 
