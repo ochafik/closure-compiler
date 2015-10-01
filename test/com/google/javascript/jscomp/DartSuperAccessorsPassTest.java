@@ -27,11 +27,10 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
 
   /** Signature of the member functions / accessors we'll wrap expressions into. */
   private static final ImmutableList<String> MEMBER_SIGNATURES = ImmutableList.of(
-      "method()", "constructor()",
-      // ES4 getters and setters:
-      "get prop()", "set prop(v)",
-      // ES6 computed properties:
-      "get ['prop']()", "set ['prop'](v)");
+      "constructor()",
+      "method()", "get prop()", "set prop(v)",
+      // ES6 Computed properties:
+      "[method]()", "get [prop]()", "set [prop](v)");
   
   private static final ImmutableList<String> ASSIGNABLE_OPS =
       ImmutableList.of("|", "^", "&", "<<", ">>", ">>>", "+", "-", "*", "/", "%");

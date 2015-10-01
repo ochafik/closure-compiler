@@ -61,47 +61,27 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
   @Override
   public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
     if (isSuperGet(n)) {
-      replace(n, convertSuperGet(n));
-      reportEs6Change();
+      visitSuperGet(n);
       return false;
     } else if (isSuperSet(n)) {
-      n = replace(n, normalizeAssignmentOp(n));
-      replace(n, convertSuperSet(n));
-      reportEs6Change();
+      if (!n.isAssign()) {
+        n = normalizeAssignmentOp(n);
+      }
+      visitSuperSet(n);
       return false;
     }
-
     return true;
-  }
-  
-  private static Node replace(Node original, Node replacement) {
-    if (original != replacement) {
-      original.getParent().replaceChild(original, replacement);
-    }
-    return replacement;
   }
 
   /** Transforms `a += b` to `a = a + b`. */
   private static Node normalizeAssignmentOp(Node n) {
-    Preconditions.checkArgument(NodeUtil.isAssignmentOp(n));
-    if (n.isAssign()) {
-      return n;
-    }
     Node lhs = n.getFirstChild();
     Node rhs = n.getLastChild();
     Node newRhs = new Node(
         NodeUtil.getOpFromAssignmentOp(n), 
         lhs.cloneTree(),
         rhs.cloneTree()).srcrefTree(n);
-    return IR.assign(lhs.cloneTree(), newRhs).srcrefTree(n);
-  }
-
-  private boolean isCalled(Node n) {
-    Node parent = n.getParent();
-    if (parent.isCall()) {
-      return n == parent.getFirstChild();
-    }
-    return false;
+    return replace(n, IR.assign(lhs.cloneTree(), newRhs).srcrefTree(n));
   }
 
   @Override
@@ -114,10 +94,13 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
         && isInsideInstanceMember(n);
   }
 
+  private static boolean isCalled(Node n) {
+    Node parent = n.getParent();
+    return parent.isCall() && n == parent.getFirstChild();
+  }
+
   private boolean isSuperSet(Node n) {
-    // TODO(ochafik): Handle Token.ASSIGN_ADD (super.x += 1).
-    return NodeUtil.isAssignmentOp(n)
-        && isSuperGet(n.getFirstChild());
+    return NodeUtil.isAssignmentOp(n) && isSuperGet(n.getFirstChild());
   }
 
   /**
@@ -141,16 +124,17 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
     return false;
   }
 
-  private Node convertSuperGet(Node superGet) {
+  private void visitSuperGet(Node superGet) {
     Node name = superGet.getLastChild().cloneTree();
     Node callSuperGet = IR.call(
         NodeUtil.newQName(compiler, CALL_SUPER_GET),
         IR.thisNode(),
         superGet.isGetProp() ? renameProperty(name) : name);
-    return callSuperGet.srcrefTree(superGet);
+    replace(superGet, callSuperGet.srcrefTree(superGet));
+    reportEs6Change();
   }
 
-  private Node convertSuperSet(Node superSet) {
+  private void visitSuperSet(Node superSet) {
     Preconditions.checkArgument(superSet.isAssign());
     
     // First, recurse on the assignment's right-hand-side.
@@ -165,13 +149,19 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
         IR.thisNode(),
         superGet.isGetProp() ? renameProperty(name) : name,
         rhs.cloneTree());
-    return callSuperSet.srcrefTree(superSet);
+    replace(superSet, callSuperSet.srcrefTree(superSet));
+    reportEs6Change();
   }
 
   private void reportEs6Change() {
     compiler.needsEs6Runtime = true;
     compiler.needsEs6DartRuntime = true;
     compiler.reportCodeChange();
+  }
+  
+  private static Node replace(Node original, Node replacement) {
+    original.getParent().replaceChild(original, replacement);
+    return replacement;
   }
 
   /**
