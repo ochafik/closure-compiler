@@ -26,8 +26,15 @@ import com.google.javascript.jscomp.CompilerOptions.LanguageMode;
 public final class DartSuperAccessorsPassTest extends CompilerTestCase {
 
   /** Signature of the member functions / accessors we'll wrap expressions into. */
-  private static final ImmutableList<String> MEMBER_SIGNATURES =
-      ImmutableList.of("method()", "get prop()", "set prop(v)", "constructor()");
+  private static final ImmutableList<String> MEMBER_SIGNATURES = ImmutableList.of(
+      "method()", "constructor()",
+      // ES4 getters and setters:
+      "get prop()", "set prop(v)",
+      // ES6 computed properties:
+      "get ['prop']()", "set ['prop'](v)");
+  
+  private static final ImmutableList<String> ASSIGNABLE_OPS =
+      ImmutableList.of("|", "^", "&", "<<", ">>", ">>>", "+", "-", "*", "/", "%");
 
   private PropertyRenamingPolicy propertyRenaming;
   @Override
@@ -110,7 +117,23 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
         "super.prop = x",
         "$jscomp.superSet(this, JSCompiler_renameProperty('prop'), x)");
   }
-  
+
+  /** Test operators like `super.x += y`. */
+  public void testSuperSetAssignableOps() {
+    propertyRenaming = PropertyRenamingPolicy.OFF;
+    for (String op : ASSIGNABLE_OPS) {
+      String assignOp = op + "=";
+      checkConversionWithinMembers(
+          "super.a " + assignOp + " b",
+          "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') " + op + " b)");
+      // Also ensure the right-hand-side of these operators is recursed upon.
+      checkConversionWithinMembers(
+          "super.a " + assignOp + " super.b",
+          "$jscomp.superSet(this, 'a', "
+              + "$jscomp.superGet(this, 'a') " + op + " $jscomp.superGet(this, 'b'))");
+    }
+  }
+
   public void testSuperSetRecursion() {
     checkConversionWithinMembers(
         "super['x'] = super['y']",
@@ -122,7 +145,7 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
         "super['x'] = 1 + super['y']",
         "$jscomp.superSet(this, 'x', 1 + $jscomp.superGet(this, 'y'))");
   }
-  
+
 
   public void testExpressionsWithoutSuperAccessors() {
     String body = LINE_JOINER.join(
