@@ -954,12 +954,6 @@ public abstract class AbstractCommandLineRunner<A extends Compiler,
     compiler = createCompiler();
     B options = createOptions();
 
-    if (options.dartPass) {
-      // --dart_pass does not support type-aware property renaming yet.
-      options.setAmbiguateProperties(false);
-      options.setDisambiguateProperties(false);
-    }
-
     List<SourceFile> externs = createExterns(options);
 
     List<JSModule> modules = null;

@@ -224,12 +224,6 @@ public final class DefaultPassConfig extends PassConfig {
       checks.add(angularPass);
     }
 
-    // It's important that the Dart super accessors pass run *before* the
-    // Es6toEs3 rewrite. This is enforced in the assertValidOrder method.
-    if (options.dartPass && !options.getLanguageOut().isEs6OrHigher()) {
-      checks.add(dartSuperAccessorsPass);
-    }
-
     if (options.getLanguageIn() == LanguageMode.ECMASCRIPT6_TYPED
         && options.getLanguageOut() != LanguageMode.ECMASCRIPT6_TYPED) {
       checks.add(convertEs6TypedToEs6);
@@ -297,6 +291,12 @@ public final class DefaultPassConfig extends PassConfig {
       checks.add(es6RenameVariablesInParamLists);
       checks.add(es6SplitVariableDeclarations);
       checks.add(es6RewriteDestructuring);
+    }
+
+    // It's important that the Dart super accessors pass run *before*
+    // es6ConvertSuper. This is enforced in the assertValidOrder method.
+    if (options.dartPass && !options.getLanguageOut().isEs6OrHigher()) {
+      checks.add(dartSuperAccessorsPass);
     }
 
     // Late ES6 transpilation.
@@ -528,7 +528,7 @@ public final class DefaultPassConfig extends PassConfig {
     if (options.computeFunctionSideEffects) {
       passes.add(markPureFunctions);
     } else if (options.markNoSideEffectCalls) {
-      // TODO(user) The properties that this pass adds to CALL and NEW
+      // TODO(avd) The properties that this pass adds to CALL and NEW
       // AST nodes increase the AST's in-memory size.  Given that we are
       // already running close to our memory limits, we could run into
       // trouble if we end up using the @nosideeffects annotation a lot
@@ -576,12 +576,12 @@ public final class DefaultPassConfig extends PassConfig {
       passes.add(replaceStrings);
     }
 
-    // TODO(user): This forces a first crack at crossModuleCodeMotion
+    // TODO(acleung): This forces a first crack at crossModuleCodeMotion
     // before devirtualization. Once certain functions are devirtualized,
     // it confuses crossModuleCodeMotion ability to recognized that
     // it is recursive.
 
-    // TODO(user): This is meant for a temporary quick win.
+    // TODO(acleung): This is meant for a temporary quick win.
     // In the future, we might want to improve our analysis in
     // CrossModuleCodeMotion so we don't need to do this.
     if (options.crossModuleCodeMotion) {
@@ -931,7 +931,7 @@ public final class DefaultPassConfig extends PassConfig {
   private void assertValidOrder(List<PassFactory> checks) {
     int polymerIndex = checks.indexOf(polymerPass);
     int dartSuperAccessorsIndex = checks.indexOf(dartSuperAccessorsPass);
-    int es6toEs3Index = checks.indexOf(convertEs6ToEs3);
+    int es6ConvertSuperIndex = checks.indexOf(es6ConvertSuper);
     int closureIndex = checks.indexOf(closurePrimitives);
     int suspiciousCodeIndex = checks.indexOf(suspiciousCode);
     int checkVarsIndex = checks.indexOf(checkVariableReferences);
@@ -945,9 +945,9 @@ public final class DefaultPassConfig extends PassConfig {
       Preconditions.checkState(polymerIndex < suspiciousCodeIndex,
           "The Polymer pass must run before suspiciousCode processing.");
     }
-    if (dartSuperAccessorsIndex != -1 && es6toEs3Index != -1) {
-      Preconditions.checkState(dartSuperAccessorsIndex < es6toEs3Index,
-          "The Dart super accessors pass must run before ES6->ES3 lowering.");
+    if (dartSuperAccessorsIndex != -1 && es6ConvertSuperIndex != -1) {
+      Preconditions.checkState(dartSuperAccessorsIndex < es6ConvertSuperIndex,
+          "The Dart super accessors pass must run before ES6->ES3 super lowering.");
     }
     if (googScopeIndex != -1) {
       Preconditions.checkState(checkVarsIndex != -1,
@@ -1489,7 +1489,7 @@ public final class DefaultPassConfig extends PassConfig {
       new PassFactory("GlobalTypeInfo", true) {
         @Override
         protected CompilerPass create(final AbstractCompiler compiler) {
-          return new GlobalTypeInfo(compiler);
+          return compiler.getSymbolTable();
         }
       };
 

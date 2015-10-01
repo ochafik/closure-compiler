@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 The Closure Compiler Authors.
+ * Copyright 2015 The Closure Compiler Authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,9 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
     CompilerOptions options = compiler.getOptions();
 
     this.renameProperties = options.propertyRenaming == PropertyRenamingPolicy.ALL_UNQUOTED;
+
+    Preconditions.checkState(options.getLanguageOut().isEs5OrHigher(),
+        "Dart super accessors pass requires ES5+ output");
 
     // We currently rely on JSCompiler_renameProperty, which is not type-aware.
     // We would need something like goog.reflect.object (with the super class type),
