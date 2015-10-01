@@ -73,14 +73,17 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
     return true;
   }
 
+  private static boolean isCalled(Node n) {
+    Node parent = n.getParent();
+    return parent.isCall() && (n == parent.getFirstChild());
+  }
+
   /** Transforms `a += b` to `a = a + b`. */
   private static Node normalizeAssignmentOp(Node n) {
     Node lhs = n.getFirstChild();
     Node rhs = n.getLastChild();
-    Node newRhs = new Node(
-        NodeUtil.getOpFromAssignmentOp(n), 
-        lhs.cloneTree(),
-        rhs.cloneTree()).srcrefTree(n);
+    Node newRhs = new Node(NodeUtil.getOpFromAssignmentOp(n), 
+        lhs.cloneTree(), rhs.cloneTree()).srcrefTree(n);
     return replace(n, IR.assign(lhs.cloneTree(), newRhs).srcrefTree(n));
   }
 
@@ -92,11 +95,6 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
         && !isCalled(n)
         && n.getFirstChild().isSuper()
         && isInsideInstanceMember(n);
-  }
-
-  private static boolean isCalled(Node n) {
-    Node parent = n.getParent();
-    return parent.isCall() && n == parent.getFirstChild();
   }
 
   private boolean isSuperSet(Node n) {
