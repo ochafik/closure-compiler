@@ -79,8 +79,8 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
   }
 
   /**
-   * Returns true if this node is or is enclosed by an instance member definition (non-static method,
-   * getter or setter).
+   * Returns true if this node is or is enclosed by an instance member definition
+   * (non-static method, getter or setter).
    */
   private static boolean isInsideInstanceMember(Node n) {
     while (n != null) {
@@ -108,6 +108,7 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
 
     superGet.getParent().replaceChild(superGet, callSuperGet);
 
+    compiler.needsEs6Runtime = true;
     compiler.needsEs6DartRuntime = true;
     compiler.reportCodeChange();
   }
@@ -129,6 +130,7 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
 
     superSet.getParent().replaceChild(superSet, callSuperSet);
 
+    compiler.needsEs6Runtime = true;
     compiler.needsEs6DartRuntime = true;
     compiler.reportCodeChange();
   }
@@ -140,8 +142,10 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
    */
   private static Node renameProperty(Node propertyName) {
     Preconditions.checkArgument(propertyName.isString());
-    Node call = IR.call(IR.name(NodeUtil.JSC_PROPERTY_NAME_FN), propertyName).srcrefTree(propertyName);
+    Node call = IR.call(IR.name(NodeUtil.JSC_PROPERTY_NAME_FN), propertyName);
+    call.srcrefTree(propertyName);
     call.putBooleanProp(Node.FREE_CALL, true);
+    call.putBooleanProp(Node.IS_CONSTANT_NAME, true);
     return call;
   }
 

@@ -71,10 +71,10 @@ $jscomp.superGet = function(target, propertyName) {
 $jscomp.superSet = function(target, propertyName, value) {
   var desc = $jscomp.getSuperPropertyDescriptor_(target, propertyName);
   if (desc) {
-    if (!desc.setter) {
+    if (!desc.set) {
       throw new TypeError('No setter for super.' + propertyName);
     }
-    desc.setter.call(target, value);
+    desc.set.call(target, value);
   }
   target[propertyName] = value;
   return value;
