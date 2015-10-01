@@ -31,10 +31,18 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
   static final String CALL_SUPER_SET = "$jscomp.superSet";
 
   private final AbstractCompiler compiler;
+  /**
+   * Whether JSCompiler_renameProperty can and should be used (i.e. if we think a RenameProperties
+   * pass will be run.
+   */
+  private final boolean renameProperties;
 
   public DartSuperAccessorsPass(AbstractCompiler compiler) {
     this.compiler = compiler;
     CompilerOptions options = compiler.getOptions();
+
+    this.renameProperties = options.propertyRenaming == PropertyRenamingPolicy.ALL_UNQUOTED;
+
     // We currently rely on JSCompiler_renameProperty, which is not type-aware.
     // We would need something like goog.reflect.object (with the super class type),
     // but right now this would yield much larger code.
@@ -108,9 +116,7 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
 
     superGet.getParent().replaceChild(superGet, callSuperGet);
 
-    compiler.needsEs6Runtime = true;
-    compiler.needsEs6DartRuntime = true;
-    compiler.reportCodeChange();
+    reportEs6Change();
   }
 
   private void visitSuperSet(Node superSet) {
@@ -130,6 +136,10 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
 
     superSet.getParent().replaceChild(superSet, callSuperSet);
 
+    reportEs6Change();
+  }
+  
+  private void reportEs6Change() {
     compiler.needsEs6Runtime = true;
     compiler.needsEs6DartRuntime = true;
     compiler.reportCodeChange();
@@ -138,10 +148,14 @@ public final class DartSuperAccessorsPass implements NodeTraversal.Callback,
   /**
    * Wraps a property string in a JSCompiler_renameProperty call.
    *
-   * <p>Should only be called in phases running before {@link RenameProperties}.
+   * <p>Should only be called in phases running before {@link RenameProperties},
+   * if such a pass is even used (see {@link #renameProperties}).
    */
-  private static Node renameProperty(Node propertyName) {
+  private Node renameProperty(Node propertyName) {
     Preconditions.checkArgument(propertyName.isString());
+    if (!renameProperties) {
+      return propertyName;
+    }
     Node call = IR.call(IR.name(NodeUtil.JSC_PROPERTY_NAME_FN), propertyName);
     call.srcrefTree(propertyName);
     call.putBooleanProp(Node.FREE_CALL, true);

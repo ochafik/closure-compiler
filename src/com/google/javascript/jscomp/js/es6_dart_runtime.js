@@ -75,7 +75,8 @@ $jscomp.superSet = function(target, propertyName, value) {
       throw new TypeError('No setter for super.' + propertyName);
     }
     desc.set.call(target, value);
+  } else {
+    target[propertyName] = value;
   }
-  target[propertyName] = value;
   return value;
 };
