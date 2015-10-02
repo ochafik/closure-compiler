@@ -31,9 +31,6 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
       "method()", "*generator()", "get prop()", "set prop(v)",
       // ES6 Computed properties:
       "[method]()", "*[generator]()", "get [prop]()", "set [prop](v)");
-  
-  private static final ImmutableList<String> ASSIGNABLE_OPS =
-      ImmutableList.of("|", "^", "&", "<<", ">>", ">>>", "+", "-", "*", "/", "%");
 
   private PropertyRenamingPolicy propertyRenaming;
   @Override
@@ -120,17 +117,39 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
   /** Test operators like `super.x += y`. */
   public void testSuperSetAssignmentOps() {
     propertyRenaming = PropertyRenamingPolicy.OFF;
-    for (String op : ASSIGNABLE_OPS) {
-      String assignmentOp = op + "=";
-      checkConversionWithinMembers(
-          "super.a " + assignmentOp + " b",
-          "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') " + op + " b)");
-      // Also ensure the right-hand-side of these operators is recursed upon.
-      checkConversionWithinMembers(
-          "super.a " + assignmentOp + " super.b",
-          "$jscomp.superSet(this, 'a', "
-              + "$jscomp.superGet(this, 'a') " + op + " $jscomp.superGet(this, 'b'))");
-    }
+    checkConversionWithinMembers(
+        "super.a |= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') | b)");
+    checkConversionWithinMembers(
+        "super.a ^= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') ^ b)");
+    checkConversionWithinMembers(
+        "super.a &= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') & b)");
+    checkConversionWithinMembers(
+        "super.a <<= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') << b)");
+    checkConversionWithinMembers(
+        "super.a >>= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') >> b)");
+    checkConversionWithinMembers(
+        "super.a >>>= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') >>> b)");
+    checkConversionWithinMembers(
+        "super.a += b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') + b)");
+    checkConversionWithinMembers(
+        "super.a -= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') - b)");
+    checkConversionWithinMembers(
+        "super.a *= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') * b)");
+    checkConversionWithinMembers(
+        "super.a /= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') / b)");
+    checkConversionWithinMembers(
+        "super.a %= b",
+        "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') % b)");
   }
 
   public void testSuperSetRecursion() {
@@ -141,8 +160,8 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
         "super['x'] = super['y'] = 10",
         "$jscomp.superSet(this, 'x', $jscomp.superSet(this, 'y', 10))");
     checkConversionWithinMembers(
-        "super['x'] = 1 + super['y']",
-        "$jscomp.superSet(this, 'x', 1 + $jscomp.superGet(this, 'y'))");
+        "super['x'] += super['y']",
+        "$jscomp.superSet(this, 'x', $jscomp.superGet(this, 'x') + $jscomp.superGet(this, 'y'))");
   }
 
 
