@@ -1166,7 +1166,7 @@ public class CommandLineRunner extends
 
     options.polymerPass = flags.polymerPass;
     
-    options.dartPass = flags.dartPass;
+    options.setDartPass(flags.dartPass);
 
     options.renamePrefixNamespace = flags.renamePrefixNamespace;
 
