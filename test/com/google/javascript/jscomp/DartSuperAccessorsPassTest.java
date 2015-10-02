@@ -118,16 +118,16 @@ public final class DartSuperAccessorsPassTest extends CompilerTestCase {
   }
 
   /** Test operators like `super.x += y`. */
-  public void testSuperSetAssignableOps() {
+  public void testSuperSetAssignmentOps() {
     propertyRenaming = PropertyRenamingPolicy.OFF;
     for (String op : ASSIGNABLE_OPS) {
-      String assignOp = op + "=";
+      String assignmentOp = op + "=";
       checkConversionWithinMembers(
-          "super.a " + assignOp + " b",
+          "super.a " + assignmentOp + " b",
           "$jscomp.superSet(this, 'a', $jscomp.superGet(this, 'a') " + op + " b)");
       // Also ensure the right-hand-side of these operators is recursed upon.
       checkConversionWithinMembers(
-          "super.a " + assignOp + " super.b",
+          "super.a " + assignmentOp + " super.b",
           "$jscomp.superSet(this, 'a', "
               + "$jscomp.superGet(this, 'a') " + op + " $jscomp.superGet(this, 'b'))");
     }
